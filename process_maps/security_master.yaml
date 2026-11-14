@@ -1,0 +1,146 @@
+id: security_master
+name: Security Master Build
+description: Builds the daily golden security master from the vendor reference feed.
+purpose: >
+  Takes the vendor's end-of-day reference data file, standardises identifiers and field names,
+  enriches equities and fixed income on separate branches, and publishes one golden security
+  master that every downstream process (positions, pricing, reporting) reads.
+schedule: Weekdays. Vendor file lands around 18:00 UTC; golden file is published by 19:30 UTC.
+run_semantics: >
+  Every run writes new files; nothing is overwritten. The business date in a filename is the
+  as-of date of the data. The run timestamp is the UTC time the step started. Several files with
+  the same business date and different run timestamps are retries or reruns of that date: the
+  LATEST run timestamp is the one downstream steps consume, earlier ones are superseded.
+  A backfill reprocesses an old business date, so its run timestamp is days or weeks later than
+  its business date in every folder; in the normalised folder backfilled files also carry the
+  suffix _BF. Filesystem modification time is not reliable for any of this: files are copied
+  between shares.
+
+folders:
+  - id: vendor_raw
+    path: security_master/01_vendor_raw
+    description: Vendor reference feed exactly as delivered. One row per listing.
+    filename_convention:
+      pattern: "vendor_ref_{business_date}_{run_timestamp}.csv"
+      regex: '^vendor_ref_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "As-of date of the vendor data"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the vendor delivery was received"}
+      notes: A second file for the same business_date is a vendor redelivery (correction).
+    identifier_columns:
+      - {column: ISIN, identifier_type: ISIN}
+      - {column: SEDOL, identifier_type: SEDOL, notes: "7 characters, may start with zeroes"}
+      - {column: VendorId, identifier_type: vendor internal id}
+    record_key_columns: [ISIN, ExchangeCode]
+
+  - id: normalised
+    path: security_master/02_normalised
+    description: Vendor data with standardised column names and identifiers. One row per listing.
+    filename_convention:
+      pattern: "sm_normalised_{business_date}_{run_timestamp}[_BF].csv"
+      regex: '^sm_normalised_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})(?P<backfill>_BF)?\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "As-of date of the data"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the normalise step started"}
+        backfill: {meaning: "Present (_BF) when the file was produced by a backfill"}
+    identifier_columns:
+      - {column: isin, identifier_type: ISIN}
+      - {column: sedol, identifier_type: SEDOL}
+    record_key_columns: [isin, exchange_code]
+
+  - id: equity_enriched
+    path: security_master/03a_equity_enriched
+    description: Equities only, with sector classification added.
+    filename_convention:
+      pattern: "sm_equity_{business_date}_{run_timestamp}.csv"
+      regex: '^sm_equity_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "As-of date of the data"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the equity enrichment step started"}
+    identifier_columns: [{column: isin, identifier_type: ISIN}]
+    record_key_columns: [isin, exchange_code]
+
+  - id: fixed_income_enriched
+    path: security_master/03b_fixed_income_enriched
+    description: Bonds only, with maturity and coupon validated.
+    filename_convention:
+      pattern: "sm_fi_{business_date}_{run_timestamp}.csv"
+      regex: '^sm_fi_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "As-of date of the data"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the fixed income enrichment step started"}
+    identifier_columns: [{column: isin, identifier_type: ISIN}]
+    record_key_columns: [isin, exchange_code]
+
+  - id: golden
+    path: security_master/04_golden
+    description: Published golden security master. One row per security (primary listing only).
+    filename_convention:
+      pattern: "security_master_{business_date}_{run_timestamp}.csv"
+      regex: '^security_master_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "As-of date of the data"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the publish step started"}
+    identifier_columns:
+      - {column: isin, identifier_type: ISIN}
+      - {column: sedol, identifier_type: SEDOL}
+    record_key_columns: [isin]
+
+steps:
+  - id: ingest
+    name: Receive vendor file
+    description: Lands the vendor delivery unchanged in vendor_raw.
+    writes: [vendor_raw]
+    downstream: [normalise]
+
+  - id: normalise
+    name: Normalise
+    description: Renames columns, cleans identifiers and drops rows that cannot be identified.
+    reads: [vendor_raw]
+    writes: [normalised]
+    downstream: [enrich_equity, enrich_fixed_income]
+    field_mappings:
+      - {from_folder: vendor_raw, from_column: ISIN, to_folder: normalised, to_column: isin, rule: "Trimmed and upper-cased"}
+      - {from_folder: vendor_raw, from_column: SEDOL, to_folder: normalised, to_column: sedol, rule: "Kept as text; leading zeroes preserved"}
+      - {from_folder: vendor_raw, from_column: SecurityName, to_folder: normalised, to_column: name}
+      - {from_folder: vendor_raw, from_column: AssetType, to_folder: normalised, to_column: asset_class, rule: "EQ -> EQUITY, BD -> BOND, anything else -> OTHER"}
+      - {from_folder: vendor_raw, from_column: ExchangeCode, to_folder: normalised, to_column: exchange_code}
+      - {from_folder: vendor_raw, from_column: ClosePrice, to_folder: normalised, to_column: close_price, rule: "Rounded to 4 decimal places"}
+      - {from_folder: vendor_raw, from_column: Ccy, to_folder: normalised, to_column: currency}
+    transformation_rules:
+      - "Reads only the latest run_timestamp of vendor_raw for the business date."
+    filter_rules:
+      - "Rows with an empty ISIN are dropped."
+      - "Rows where Status is 'DELISTED' are dropped."
+
+  - id: enrich_equity
+    name: Enrich equities
+    description: Adds sector classification to equities.
+    branch_condition: "Takes rows where asset_class = EQUITY."
+    reads: [normalised]
+    writes: [equity_enriched]
+    downstream: [publish]
+    filter_rules:
+      - "Rows with asset_class other than EQUITY do not enter this branch."
+
+  - id: enrich_fixed_income
+    name: Enrich fixed income
+    description: Validates maturity and coupon for bonds.
+    branch_condition: "Takes rows where asset_class = BOND."
+    reads: [normalised]
+    writes: [fixed_income_enriched]
+    downstream: [publish]
+    filter_rules:
+      - "Rows with asset_class other than BOND do not enter this branch."
+      - "Bonds whose maturity_date is before the business date are dropped."
+
+  - id: publish
+    name: Publish golden master
+    description: Merges both branches and keeps the primary listing of each security.
+    reads: [equity_enriched, fixed_income_enriched]
+    writes: [golden]
+    transformation_rules:
+      - "Where a security has several listings, only the row with is_primary = Y is kept."
+    filter_rules:
+      - "asset_class OTHER is in neither branch, so such securities never reach the golden master."
+      - "Securities with no primary listing are dropped."

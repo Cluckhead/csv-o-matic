@@ -1,0 +1,15 @@
+# CSV-o-Matic configuration. Relative paths are resolved against this file's directory.
+data_root: ./sample_data          # base directory for relative folder paths in process maps
+process_maps_dir: ./process_maps  # maintained YAML/JSON process maps, re-read on every request
+
+limits:                           # every key is optional; the values below are the defaults
+  max_rows_per_response: 25       # matching rows returned by one call
+  max_output_bytes: 60000         # hard ceiling on the size of any tool response
+  max_cell_chars: 2000            # longer cell values are cut and flagged
+  max_sample_rows: 10             # ceiling for inspect_csv_headers sample_rows
+  max_files_per_listing: 200      # files returned by one list_csv_files call
+  max_concurrent_scans: 2         # file scans running at once; further scans queue
+  max_scan_seconds: 120           # time budget per scan; on expiry the result is marked incomplete and resumable
+  progress_interval_seconds: 2    # how often progress notifications are sent during a scan
+  chunk_bytes: 4194304            # read size; memory use is a small multiple of this per running scan
+  max_record_bytes: 16777216      # longest single CSV record accepted (guards against unterminated quotes)

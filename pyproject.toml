@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "csv-o-matic"
+version = "0.1.0"
+description = "Read-only MCP server for investigating individual securities across large ETL CSV files"
+requires-python = ">=3.11"
+dependencies = ["mcp>=2,<3", "pyyaml>=6", "pydantic>=2", "anyio>=4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+csv-o-matic = "csv_o_matic.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/csv_o_matic"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

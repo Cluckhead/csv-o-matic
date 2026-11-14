@@ -1,0 +1,120 @@
+id: eod_positions
+name: End-of-Day Positions
+description: Enriches custodian positions with the golden security master and feeds reporting and risk.
+purpose: >
+  Loads custodian position files, joins them to the golden security master to add security
+  attributes and market value, then branches into a client reporting extract and a risk feed.
+schedule: Weekdays, after the Security Master Build publishes (about 20:00 UTC).
+run_semantics: >
+  The business date in a filename is the position date. The run timestamp is the UTC start time of
+  the step. A rerun for the same position date produces a new file with a later run timestamp and
+  supersedes the earlier one. Custodian late deliveries cause same-day reruns. The join always
+  uses the golden security master with the same business date and the latest run timestamp that
+  existed when the step started - so a security added by a later security master rerun will be
+  missing from positions produced before that rerun.
+
+folders:
+  - id: custodian_raw
+    path: positions/01_custodian_raw
+    description: Custodian position files as received. One row per portfolio and security.
+    filename_convention:
+      pattern: "custodian_positions_{business_date}_{run_timestamp}.csv"
+      regex: '^custodian_positions_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "Position date"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the custodian file was received"}
+    identifier_columns:
+      - {column: SecurityId, identifier_type: SEDOL, notes: "SEDOL as text; leading zeroes are significant"}
+    record_key_columns: [PortfolioCode, SecurityId]
+
+  - id: golden
+    path: security_master/04_golden
+    description: Golden security master published by the Security Master Build (read only by this process).
+    identifier_columns:
+      - {column: isin, identifier_type: ISIN}
+      - {column: sedol, identifier_type: SEDOL}
+    record_key_columns: [isin]
+
+  - id: enriched
+    path: positions/02_enriched
+    description: Positions joined to the security master, with market value. One row per portfolio and security.
+    filename_convention:
+      pattern: "positions_enriched_{business_date}_{run_timestamp}.csv"
+      regex: '^positions_enriched_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "Position date"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the enrich step started"}
+    identifier_columns:
+      - {column: isin, identifier_type: ISIN}
+      - {column: sedol, identifier_type: SEDOL}
+    record_key_columns: [portfolio_code, isin]
+
+  - id: client_report
+    path: positions/03a_client_report
+    description: Client reporting extract.
+    filename_convention:
+      pattern: "client_holdings_{business_date}_{run_timestamp}.csv"
+      regex: '^client_holdings_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "Position date"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the report extract step started"}
+    identifier_columns: [{column: ISIN, identifier_type: ISIN}]
+    record_key_columns: [Portfolio, ISIN]
+
+  - id: risk_feed
+    path: positions/03b_risk_feed
+    description: Position feed for the risk system.
+    filename_convention:
+      pattern: "risk_positions_{business_date}_{run_timestamp}.csv"
+      regex: '^risk_positions_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "Position date"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the risk feed step started"}
+    identifier_columns: [{column: isin, identifier_type: ISIN}]
+    record_key_columns: [portfolio_code, isin]
+
+steps:
+  - id: load_custodian
+    name: Load custodian positions
+    description: Lands the custodian file unchanged.
+    writes: [custodian_raw]
+    downstream: [enrich]
+
+  - id: enrich
+    name: Enrich positions
+    description: Joins positions to the golden security master on SEDOL and computes market value.
+    reads: [custodian_raw, golden]
+    writes: [enriched]
+    downstream: [client_report, risk_feed]
+    field_mappings:
+      - {from_folder: custodian_raw, from_column: PortfolioCode, to_folder: enriched, to_column: portfolio_code}
+      - {from_folder: custodian_raw, from_column: SecurityId, to_folder: enriched, to_column: sedol, rule: "Join key to golden.sedol"}
+      - {from_folder: custodian_raw, from_column: Quantity, to_folder: enriched, to_column: quantity}
+      - {from_folder: golden, from_column: isin, to_folder: enriched, to_column: isin}
+      - {from_folder: golden, from_column: name, to_folder: enriched, to_column: name}
+      - {from_folder: golden, from_column: close_price, to_folder: enriched, to_column: price}
+    transformation_rules:
+      - "market_value = quantity * price, rounded to 2 decimal places."
+    filter_rules:
+      - "Inner join: positions whose SecurityId has no matching sedol in the golden master are dropped."
+      - "Positions with Quantity = 0 are dropped."
+
+  - id: client_report
+    name: Client reporting extract
+    description: Produces the holdings extract sent to client reporting.
+    branch_condition: "All enriched positions except internal portfolios."
+    reads: [enriched]
+    writes: [client_report]
+    field_mappings:
+      - {from_folder: enriched, from_column: portfolio_code, to_folder: client_report, to_column: Portfolio}
+      - {from_folder: enriched, from_column: isin, to_folder: client_report, to_column: ISIN}
+      - {from_folder: enriched, from_column: market_value, to_folder: client_report, to_column: MarketValue}
+    filter_rules:
+      - "Portfolios whose code starts with 'INT' are excluded."
+
+  - id: risk_feed
+    name: Risk feed
+    description: Sends all enriched positions to the risk system.
+    branch_condition: "All enriched positions."
+    reads: [enriched]
+    writes: [risk_feed]
