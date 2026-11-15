@@ -4,7 +4,7 @@ process_maps_dir: ./process_maps  # maintained YAML/JSON process maps, re-read o
 
 limits:                           # every key is optional; the values below are the defaults
   max_rows_per_response: 25       # matching rows returned by one call
-  max_output_bytes: 60000         # hard ceiling on the size of any tool response (minimum 8000)
+  max_output_bytes: 120000        # hard ceiling on any tool result: structured content + JSON text together (minimum 16000)
   max_cell_chars: 2000            # longer cell values are cut and flagged
   max_sample_rows: 10             # ceiling for inspect_csv_headers sample_rows
   max_files_per_listing: 200      # files returned by one list_csv_files call

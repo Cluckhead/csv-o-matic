@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
+
+from conftest import wire_bytes
 
 hypothesis = pytest.importorskip("hypothesis")
 pd = pytest.importorskip("pandas")
@@ -134,7 +135,7 @@ def awkward(draw):
     width = draw(st.integers(1, 400))
     names = ["ID"] + draw(st.lists(name, min_size=width, max_size=width))
     rows = draw(st.lists(st.lists(value, min_size=width, max_size=width), min_size=1, max_size=6))
-    limit = draw(st.sampled_from([8000, 9000, 15000, 60000]))
+    limit = draw(st.sampled_from([16000, 18000, 30000, 120000]))
     return names, [["A1"] + r for r in rows], limit
 
 
@@ -167,5 +168,5 @@ def test_no_response_exceeds_the_output_limit(ws, case, data):
             payload = call()
         except ToolFailure as failure:  # e.g. an ambiguous column: a legitimate, small answer
             payload = {"error": {"type": failure.kind, "message": failure.message, **failure.details}}
-        size = len(json.dumps({"tool": "compare_security_records", **payload}, ensure_ascii=False).encode("utf-8"))
+        size = wire_bytes(payload)
         assert size <= limit, f"call {index}: {size} bytes exceeds the limit of {limit}"

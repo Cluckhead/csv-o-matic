@@ -11,7 +11,7 @@ import pytest
 from mcp.client import Client
 
 from csv_o_matic.config import Config, Limits
-from csv_o_matic.server import build_server
+from csv_o_matic.server import build_server, result_size
 from csv_o_matic.service import Service
 
 from conftest import digest
@@ -111,7 +111,7 @@ def test_failures_are_explained_with_the_request_echoed(env):
 
 def test_every_response_respects_the_output_limit(env):
     async def main():
-        limit = 8000
+        limit = 16000
         async with Client(build_server(config(env, max_output_bytes=limit))) as client:
             for tool, args in [
                 ("get_process_map", {"process": "demo"}),
@@ -125,7 +125,7 @@ def test_every_response_respects_the_output_limit(env):
                                               "identifier": "W0001", "identifier_column_a": "ID"}),
             ]:
                 result = await client.call_tool(tool, args)
-                assert len(result.content[0].text.encode()) <= limit, tool
+                assert result_size(result) <= limit, tool  # the whole result: structured content and text together
                 assert "response_too_large" not in result.content[0].text, tool
     run(main)
 

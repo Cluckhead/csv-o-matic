@@ -19,7 +19,7 @@ class ConfigError(Exception):
 class Limits:
     # Response bounds
     max_rows_per_response: int = 25
-    max_output_bytes: int = 60_000
+    max_output_bytes: int = 120_000  # the whole MCP result: structured content plus the same JSON as text
     max_cell_chars: int = 2_000
     max_sample_rows: int = 10
     max_files_per_listing: int = 200
@@ -36,8 +36,8 @@ class Limits:
             value = getattr(self, f.name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
                 raise ConfigError(f"limits.{f.name} must be a positive number, got {value!r}")
-        if self.max_output_bytes < 8_000:
-            raise ConfigError("limits.max_output_bytes must be at least 8000")
+        if self.max_output_bytes < 16_000:
+            raise ConfigError("limits.max_output_bytes must be at least 16000")
         if self.max_record_bytes < self.chunk_bytes:
             raise ConfigError("limits.max_record_bytes must be at least limits.chunk_bytes")
 

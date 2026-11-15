@@ -7,8 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from mcp import types
+
 from csv_o_matic.config import Config, Limits
 from csv_o_matic.csvscan import ScanControl
+from csv_o_matic.models import RESULT_MODELS
+from csv_o_matic.server import result_size
 from csv_o_matic.service import Service
 
 PROCESS_MAP = """
@@ -140,3 +144,26 @@ def ctl():
 
 def dumps(obj) -> str:
     return json.dumps(obj, ensure_ascii=False)
+
+
+def wire_bytes(out, tool: str = "compare_security_records") -> int:
+    """Size of the complete MCP result a service response becomes: structured content plus JSON text."""
+    payload = {"tool": tool, **out}
+    text = json.dumps(payload, ensure_ascii=False)
+    return result_size(types.CallToolResult(content=[types.TextContent(type="text", text=text)], structured_content=payload))
+
+
+@pytest.fixture(autouse=True)
+def every_service_response_matches_its_published_schema(monkeypatch):
+    """Whatever a test does with the service, each response must satisfy the tool's output model."""
+    def checked(name):
+        original = getattr(Service, name)
+
+        def method(self, *args, **kwargs):
+            out = original(self, *args, **kwargs)
+            RESULT_MODELS[name].model_validate({"tool": name, **out})
+            return out
+        return method
+
+    for name in RESULT_MODELS:
+        monkeypatch.setattr(Service, name, checked(name))

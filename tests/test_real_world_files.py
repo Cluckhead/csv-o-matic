@@ -10,7 +10,7 @@ import pytest
 from csv_o_matic.csvscan import ScanControl, iter_records, prefilter_needle
 from csv_o_matic.service import ToolFailure
 
-from conftest import dumps, make_service
+from conftest import make_service, wire_bytes
 
 A = "stage/a"
 
@@ -112,7 +112,7 @@ def awkward_files(env):
     return names
 
 
-@pytest.mark.parametrize("limit", [8000, 12000, 60000])
+@pytest.mark.parametrize("limit", [16000, 24000, 120000])
 def test_awkward_headers_never_exceed_the_output_limit(env, limit):
     names = awkward_files(env)
     svc = make_service(env, max_output_bytes=limit)
@@ -135,7 +135,7 @@ def test_awkward_headers_never_exceed_the_output_limit(env, limit):
         "huge compare": lambda: svc.compare_security_records(c(), A, "hugename.csv", A, "hugename.csv", "A1", "ID"),
     }
     for label, call in calls.items():
-        size = len(dumps(call()).encode()) + 60  # the server adds the tool name
+        size = wire_bytes(call())
         assert size <= limit, f"{label}: {size} bytes > {limit}"
 
 
@@ -162,13 +162,13 @@ def test_error_responses_are_bounded_too(env):
     names = awkward_files(env)
 
     async def main():
-        cfg = Config(data_root=env[0], process_maps_dir=env[1], limits=Limits(max_output_bytes=8000))
+        cfg = Config(data_root=env[0], process_maps_dir=env[1], limits=Limits(max_output_bytes=16000))
         async with Client(build_server(cfg)) as client:
             result = await client.call_tool("find_security_in_file", {
                 "folder": A, "filename": "longnames.csv", "identifier": "A1", "identifier_column": "nope",
                 "columns": names})
             text = result.content[0].text
-            assert len(text.encode()) <= 8000 and "column_not_found" in text and "response_too_large" not in text
+            assert len(text.encode()) <= 16000 and "column_not_found" in text and "response_too_large" not in text
     anyio.run(main)
 
 
@@ -223,7 +223,7 @@ def test_wrong_delimiter_is_reported_not_treated_as_absent(env, service):
     wide = b"|".join(b"col%d" % i for i in range(9000)) + b"\n" + b"|".join(b"v" for _ in range(9000)) + b"\n"
     write(env, "pipes.csv", wide)
     headers = service.inspect_csv_headers(A, "pipes.csv")
-    assert len(dumps(headers)) < 60000 and "probably delimited by '|'" in headers["warnings"][0]
+    assert wire_bytes(headers) < 120000 and "probably delimited by '|'" in headers["warnings"][0]
     # A genuine single-column file is not flagged.
     write(env, "one.csv", b"ID\n00123\n")
     assert service.find_security_in_file(ScanControl(), A, "one.csv", "9", "ID")["outcome"] == "confirmed_absent"
@@ -310,21 +310,36 @@ def test_symlinks_are_neither_listed_nor_read(env, service):
     assert info.value.kind == "file_unreadable"
 
 
-def test_a_file_swapped_for_a_link_after_the_check_is_refused(env, service):
+def test_a_file_swapped_for_a_link_after_the_check_is_refused(env, service, monkeypatch):
+    """The swap happens between the check and the open: the open itself must refuse, not the check."""
     import os
+    from csv_o_matic import access
     (env[0] / "outside.csv").write_text("ID,Secret\n00123,TOPSECRET\n")
     target = env[0] / A / "swap.csv"
     target.write_text("ID,Name\n1,x\n")
-    of = service._open(A, "swap.csv")
-    target.unlink()
-    os.symlink(env[0] / "outside.csv", target)  # the swap happens between the check and the open
+    real_open = os.open
+    swap = {"to": "link"}
+
+    def racing_open(path, flags, *args, **kwargs):
+        if path == "swap.csv" or str(path).endswith("swap.csv"):
+            target.unlink()
+            if swap["to"] == "link":
+                os.symlink(env[0] / "outside.csv", target)
+            else:
+                target.write_text("ID,Name\n2,y\n")  # ... or it is replaced by a different regular file
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(access.os, "open", racing_open)
     with pytest.raises(ToolFailure) as info:
-        service._fh(of)
+        service.search_across_columns(ScanControl(), A, "swap.csv", "00123")
     assert info.value.kind == "file_unreadable"
     target.unlink()
-    target.write_text("ID,Name\n2,y\n")  # ... or it is replaced by a different regular file
-    with pytest.raises(ToolFailure):
-        service._fh(of)
+    target.write_text("ID,Name\n1,x\n")
+    swap["to"] = "file"
+    # A different regular file swapped in at that moment is simply the file that gets opened: what is
+    # reported (size, contents) all comes from the one open handle, never from the earlier check.
+    out = service.search_across_columns(ScanControl(), A, "swap.csv", "2")
+    assert out["outcome"] == "match_found" and out["file"]["size_bytes"] == len("ID,Name\n2,y\n")
 
 
 def test_header_reading_obeys_the_time_limit(env):
@@ -347,9 +362,9 @@ def test_oversized_step_detail_is_cut_not_refused(env):
                        for i in range(400))
     path.write_text(path.read_text().replace("    reads: [stage_a]\n    writes: [stage_b]\n",
                                              "    reads: [stage_a]\n    writes: [stage_b]\n    field_mappings:\n" + mappings))
-    svc = make_service(env, max_output_bytes=8000)
+    svc = make_service(env, max_output_bytes=16000)
     out = svc.get_process_map("demo", step_id="second")
-    assert len(dumps(out)) < 8000 and out["truncated"] and "of 400 shown" in out["truncation_note"]
+    assert wire_bytes(out) < 16000 and out["truncated"] and "of 400 shown" in out["truncation_note"]
     assert len(out["step"]["field_mappings"]) > 5 and out["step"]["filter_rules"]
 
 

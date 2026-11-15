@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -184,19 +184,64 @@ class ProcessMap(_Model):
 
 @dataclass(frozen=True)
 class FolderRef:
-    """A physical folder as the tools address it, merged across every process that uses it."""
+    """An approved root: a physical folder declared by the process maps, merged across every process using it."""
 
     path: str  # as declared (normalised); this is what callers pass as `folder`
     resolved: Path
     usages: list[tuple[ProcessMap, Folder]]
+    prefixes: list[str] = field(default_factory=list)  # absolute spellings that address this folder
 
     @property
     def primary(self) -> Folder:
         return self.usages[0][1]
 
-    @property
-    def filename_convention(self) -> FilenameConvention | None:
-        return next((f.filename_convention for _, f in self.usages if f.filename_convention), None)
+    def conventions(self) -> list[tuple[FilenameConvention, list[str]]]:
+        """Every distinct filename convention declared for this folder, with the processes declaring it.
+
+        Ordered by content, never by map loading order, so renaming a map file changes nothing.
+        """
+        merged: dict[str, tuple[FilenameConvention, list[str]]] = {}
+        for proc, folder in self.usages:
+            convention = folder.filename_convention
+            if convention is None:
+                continue
+            key = json.dumps([convention.regex, convention.default_date_token,
+                              sorted((n, t.format) for n, t in convention.tokens.items())])
+            merged.setdefault(key, (convention, []))[1].append(proc.id)
+        return [(convention, sorted(owners)) for _, (convention, owners) in sorted(merged.items())]
+
+    def parse_filename(self, filename: str) -> dict[str, Any]:
+        """Evaluate every convention against a filename.
+
+        status is 'parsed' (the conventions that match agree on the tokens), 'unparsed' (none match) or
+        'ambiguous' (several match and read the name differently); 'no_convention' if none is declared.
+        """
+        conventions = self.conventions()
+        if not conventions:
+            return {"status": "no_convention", "tokens": None, "interpretations": []}
+        readings: list[tuple[dict[str, str], list[str]]] = []
+        for convention, owners in conventions:
+            tokens = convention.parse(filename)
+            if tokens is None:
+                continue
+            for known, sources in readings:
+                if known == tokens:
+                    sources.extend(owners)
+                    break
+            else:
+                readings.append((tokens, list(owners)))
+        interpretations = [{"tokens": tokens, "declared_by": sorted(sources)} for tokens, sources in readings]
+        if not readings:
+            return {"status": "unparsed", "tokens": None, "interpretations": []}
+        if len(readings) == 1:
+            return {"status": "parsed", "tokens": readings[0][0], "interpretations": interpretations}
+        return {"status": "ambiguous", "tokens": None, "interpretations": interpretations}
+
+    def date_tokens(self) -> list[str]:
+        return sorted({n for convention, _ in self.conventions() for n, t in convention.tokens.items() if t.format})
+
+    def default_date_tokens(self) -> list[str]:
+        return sorted({c.default_date_token for c, _ in self.conventions() if c.default_date_token})
 
     def csv_format(self) -> tuple[CsvFormat, str | None]:
         """The folder's CSV format, and a description of the conflict if the maps disagree.
@@ -209,8 +254,26 @@ class FolderRef:
         distinct = {(fmt.delimiter, fmt.encoding) for _, fmt in stated}
         if len(distinct) == 1:
             return stated[0][1], None
-        detail = "; ".join(f"{pid}: delimiter {fmt.delimiter!r}, encoding {fmt.encoding}" for pid, fmt in stated)
+        detail = "; ".join(f"{pid}: delimiter {fmt.delimiter!r}, encoding {fmt.encoding}" for pid, fmt in sorted(stated, key=lambda s: s[0]))
         return stated[0][1], detail
+
+
+def relative_parts(path: str, root: str) -> tuple[str, ...] | None:
+    """The components of `path` below `root`, or None if `path` is not `root` or inside it.
+
+    Whole components are compared under the host's case rules: a root 'data' never covers 'data_backup'.
+    Both arguments must be absolute and already normalised (no '.' or '..').
+    """
+    try:
+        if os.path.commonpath([os.path.normcase(path), os.path.normcase(root)]) != os.path.normcase(root):
+            return None
+    except ValueError:  # different drives, or a mix of absolute and relative
+        return None
+    rel = os.path.relpath(path, root)
+    if rel == os.curdir:
+        return ()
+    parts = tuple(Path(rel).parts)
+    return None if os.pardir in parts else parts
 
 
 @dataclass
@@ -231,23 +294,51 @@ class Catalog:
         for proc in [process] if process else self.processes:
             for folder in proc.folders:
                 declared = Path(folder.path).expanduser()
-                resolved = Path(os.path.realpath(declared if declared.is_absolute() else self.data_root / declared))
+                lexical = os.path.normpath(declared if declared.is_absolute() else self.data_root / declared)
+                resolved = Path(os.path.realpath(lexical))
                 ref = merged.get(resolved)
                 if ref is None:
-                    merged[resolved] = ref = FolderRef(_normalise(folder.path), resolved, [])
+                    merged[resolved] = ref = FolderRef(_normalise(folder.path), resolved, [], [str(resolved)])
                 ref.usages.append((proc, folder))
+                if lexical not in ref.prefixes:
+                    ref.prefixes.append(lexical)
         return list(merged.values())
 
     def find_folder(self, folder: str) -> FolderRef | None:
+        """The approved root addressed exactly by `folder`, if any."""
+        located = self.locate(folder)
+        return located[0] if located and not located[1] else None
+
+    def locate(self, folder: str) -> tuple[FolderRef, tuple[str, ...]] | None:
+        """The approved root governing `folder` and the components below it.
+
+        Purely lexical: nothing is read from disk, and '..' is collapsed before the containment test, so a
+        path can only be located inside a root it is spelled inside. The most specific root wins, which
+        lets an explicitly mapped nested folder override its parent. Whether the components really are
+        plain directories is checked when the folder is opened (see access.py).
+        """
         wanted = _normalise(folder)
+        if not wanted or "\x00" in wanted:
+            return None
         refs = self.folders()
+        for ref in refs:  # exact spellings first: the declared path, or any alias a process declared
+            if wanted == ref.path or any(wanted == _normalise(f.path) for _, f in ref.usages):
+                return ref, ()
+        absolute = os.path.normpath(wanted if os.path.isabs(wanted) else os.path.join(self.data_root, wanted))
+        best: tuple[FolderRef, tuple[str, ...]] | None = None
         for ref in refs:
-            if wanted == ref.path or wanted == str(ref.resolved):
-                return ref
-        for ref in refs:  # any alias a process declared for the same physical folder
-            if any(wanted == _normalise(f.path) for _, f in ref.usages):
-                return ref
-        return None
+            for prefix in ref.prefixes:
+                parts = relative_parts(absolute, prefix)
+                if parts is not None and (best is None or len(parts) < len(best[1])):
+                    best = (ref, parts)
+        if best is not None and best[1]:
+            # The same place spelled through the root's real location may sit inside a more specific root.
+            canonical = os.path.join(str(best[0].resolved), *best[1])
+            for ref in refs:
+                parts = relative_parts(canonical, str(ref.resolved))
+                if parts is not None and len(parts) < len(best[1]):
+                    best = (ref, parts)
+        return best
 
 
 def _normalise(path: str) -> str:

@@ -8,7 +8,7 @@ import pytest
 from csv_o_matic.csvscan import ScanControl
 from csv_o_matic.service import ToolFailure
 
-from conftest import digest, dumps, make_service
+from conftest import digest, make_service, wire_bytes
 
 A = "stage/a"
 B = "stage/b"
@@ -48,9 +48,9 @@ def test_oversized_map_degrades_to_overview(env):
     path.write_text(path.read_text().replace(
         'filter_rules: ["Drops rows with Qty = 0."]',
         "filter_rules:\n" + "".join(f'      - "Rule {i}: drops rows where some long condition number {i} holds."\n' for i in range(150))))
-    small = make_service(env, max_output_bytes=8000)
+    small = make_service(env, max_output_bytes=16000)
     out = small.get_process_map("demo")
-    assert out["truncated"] and len(dumps(out)) < 8000
+    assert out["truncated"] and wire_bytes(out) < 16000
     assert [s["id"] for s in out["process"]["steps"]] == ["first", "second", "third"]
     step = small.get_process_map("demo", step_id="second")
     assert step["step"]["filter_rules"] and {f["id"] for f in step["folders"]} == {"stage_a", "stage_b"}
@@ -142,13 +142,13 @@ def test_wide_headers(env, service):
     assert out["column_count"] == 600 and len(out["columns"]) == 600 and out["columns"][0] == "ID"
     found = service.search_column_names(A, "wide.csv", "PX_")
     assert found["matching_column_count"] == 11
-    assert found["matching_columns"][0] == {"column": "px_field_050", "position": 51}
+    assert found["matching_columns"][0] == {"column": "px_field_050", "position": 51, "selector": "px_field_050"}
     assert service.search_column_names(A, "wide.csv", "zzz")["matching_columns"] == []
     with open(env[0] / A / "wider.csv", "w") as fh:
         fh.write(",".join(f"column_{i:04d}" for i in range(2000)) + "\n")
-    small = make_service(env, max_output_bytes=8000)
+    small = make_service(env, max_output_bytes=16000)
     page = small.inspect_csv_headers(A, "wider.csv")
-    assert page["columns_truncated"] and len(dumps(page)) < 8000
+    assert page["columns_truncated"] and wire_bytes(page) < 16000
     seen, offset = list(page["columns"]), page["next_column_offset"]
     while offset is not None:
         rest = small.inspect_csv_headers(A, "wider.csv", column_offset=offset)
@@ -157,7 +157,7 @@ def test_wide_headers(env, service):
         offset = rest.get("next_column_offset")
     assert seen == [f"column_{i:04d}" for i in range(2000)]
     sample = small.inspect_csv_headers(A, "wide.csv", sample_rows=1)
-    assert sample["sample_truncated"] and len(dumps(sample)) < 8000
+    assert sample["sample_truncated"] and wire_bytes(sample) < 16000
 
 
 def test_duplicate_column_names(env, service):
@@ -247,11 +247,11 @@ def test_server_row_limit_caps_the_request(env, ctl):
 
 
 def test_output_size_truncation(env, ctl):
-    small = make_service(env, max_output_bytes=8000, max_rows_per_response=500)
+    small = make_service(env, max_output_bytes=16000, max_rows_per_response=500)
     seen, cursor = [], None
     while True:
         out = small.find_security_in_file(ctl(), A, "many.csv", "DUP", "ID", cursor=cursor)
-        assert len(dumps(out)) <= 8000
+        assert wire_bytes(out) <= 16000
         seen += [m["values"]["Seq"] for m in out["matches"]]
         if out["more_matches"] == "none":
             break
@@ -261,7 +261,7 @@ def test_output_size_truncation(env, ctl):
     # A single row wider than the whole budget is still returned, visibly cut down.
     wide = small.find_security_in_file(ctl(), A, "wide.csv", "W0003", "ID")
     row = wide["matches"][0]
-    assert len(dumps(wide)) <= 8000 and row["values_omitted_for_size"] > 0 and row["values"]["ID"] == "W0003"
+    assert wire_bytes(wide) <= 16000 and row["values_omitted_for_size"] > 0 and row["values"]["ID"] == "W0003"
     assert small.find_security_in_file(ctl(), A, "wide.csv", "W0003", "ID", columns=["col_598"])["matches"][0]["values"] == {"col_598": "v3_598"}
 
 
@@ -445,10 +445,10 @@ def test_compare_respects_output_limit(env, ctl):
         w = csv.writer(fh)
         w.writerow(["ID"] + [f"col_{i:03d}" for i in range(1, 600)])
         w.writerow(["W0003"] + ["changed"] * 599)
-    small = make_service(env, max_output_bytes=8000)
+    small = make_service(env, max_output_bytes=16000)
     out = small.compare_security_records(ctl(), A, "wide.csv", B, "wide2.csv", "W0003", "ID")
     pair = out["comparisons"][0]
-    assert len(dumps(out)) <= 8000 and pair["truncated"] and pair["changed_count"] == 588 and pair["unchanged_count"] == 1
+    assert wire_bytes(out) <= 16000 and pair["truncated"] and pair["changed_count"] == 588 and pair["unchanged_count"] == 1
     assert len(pair["changed"]) < 588 and pair["columns_omitted_for_size"]
 
 
