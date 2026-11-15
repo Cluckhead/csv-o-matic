@@ -160,8 +160,12 @@ the scan got and why it stopped.
 - `next_cursor` continues a search that stopped at a row limit, the output-size limit or the
   time limit. Cursors are stateless tokens: they hold a file position, are tied to the search
   and to the file's size and modification time, and stop working if the file changes or the
-  server restarts. Every call reads at least one chunk, so a chain of cursors always reaches
-  the end of the file however short the time budget.
+  server restarts. Every call reads at least one chunk, so a chain of cursors reaches the end
+  of the file however short the time budget, with one known exception: when a single record is
+  longer than one chunk (in practice, an unclosed quote) and the budget expires before the
+  second chunk, each call stops at the same `stopped_at_byte`. If two responses in a chain
+  stop at the same byte, raise `max_scan_seconds`; the scan then ends in a `parse_error` or an
+  unterminated-quote warning.
 - `count_matching_rows` returns `count` only after a complete scan. Otherwise `count` is
   `null`, `count_is_exact` is `false`, and `matches_seen_before_interruption` is a lower bound.
 - `compare_security_records` reports `comparison_status`: `compared`, `partially_compared`,
@@ -326,7 +330,9 @@ src/csv_o_matic/
   service.py       the nine tools as plain functions
   server.py        MCP wiring: tool definitions, progress, cancellation, concurrency
 process_maps/      example process maps
-docs/field-guide.html  guide to the tools (refresh examples: scripts/build_guide.py --guide docs/field-guide.html)
+docs/field-guide.html  guide to the tools (refresh examples: scripts/build_guide.py --guide docs/field-guide.html;
+                   add --check-model to compare the page's miniature of the rules with the real service)
+docs/field-guide.plan.md  the plan behind the field guide: outcome, sequence of ideas, one record per figure
 docs/guide.html    the earlier guide (refresh examples: scripts/build_guide.py)
 scripts/           sample data generator, guide builder, pandas check, large-file acceptance check
 tests/
