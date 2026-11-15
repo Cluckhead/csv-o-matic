@@ -80,8 +80,11 @@ def security_master(root: Path, bdate: str, run: str, vendor: list[tuple], vendo
     return golden
 
 
-def positions(root: Path, bdate: str, run: str, golden: list[dict]) -> None:
-    """Apply the rules written in process_maps/eod_positions.yaml and write each stage."""
+def positions(root: Path, bdate: str, run: str, golden: list[dict], archived: bool = False) -> None:
+    """Apply the rules written in process_maps/eod_positions.yaml and write each stage.
+
+    An archived day's enriched file sits in a dated subfolder, 02_enriched/archive/YYYY/MM.
+    """
     base = root / "positions"
     custodian = [
         ["PF001", "0417382", "1500", "GBP"],
@@ -104,7 +107,8 @@ def positions(root: Path, bdate: str, run: str, golden: list[dict]) -> None:
         value = f"{float(quantity) * float(sec['close_price']):.2f}"
         enriched.append([portfolio, sec["isin"], sedol, sec["name"], quantity, sec["close_price"], value, sec["currency"]])
     columns = ["portfolio_code", "isin", "sedol", "name", "quantity", "price", "market_value", "currency"]
-    write(base / "02_enriched" / f"positions_enriched_{bdate}_{run}.csv", columns, enriched)
+    enriched_dir = base / "02_enriched" / "archive" / bdate[:4] / bdate[4:6] if archived else base / "02_enriched"
+    write(enriched_dir / f"positions_enriched_{bdate}_{run}.csv", columns, enriched)
     write(base / "03a_client_report" / f"client_holdings_{bdate}_{run}.csv", ["Portfolio", "ISIN", "Name", "Quantity", "MarketValue"],
           [[r[0], r[1], r[3], r[4], r[6]] for r in enriched if not r[0].startswith("INT")])
     write(base / "03b_risk_feed" / f"risk_positions_{bdate}_{run}.csv", columns, enriched)
@@ -112,6 +116,10 @@ def positions(root: Path, bdate: str, run: str, golden: list[dict]) -> None:
 
 def build(root: Path) -> None:
     bulk = filler(2000, seed=7)
+    # 30 Oct and 11 Nov: earlier days, whose enriched positions have been moved to archive subfolders.
+    for day in ("20261030", "20261111"):
+        positions(root, day, f"{day}T200000", security_master(root, day, f"{day}T183000", STORY + bulk, f"{day}T180200"),
+                  archived=True)
     # 12 Nov: a normal day.
     golden = security_master(root, "20261112", "20261112T183000", STORY + bulk, "20261112T180200")
     positions(root, "20261112", "20261112T200000", golden)

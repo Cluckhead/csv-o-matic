@@ -9,6 +9,7 @@ import pytest
 
 from csv_o_matic.config import Config, Limits
 from csv_o_matic.csvscan import ScanControl
+from csv_o_matic import schemas
 from csv_o_matic.service import Service
 
 PROCESS_MAP = """
@@ -140,3 +141,51 @@ def ctl():
 
 def dumps(obj) -> str:
     return json.dumps(obj, ensure_ascii=False)
+
+
+# ------------------------------------------------------------------ output schemas
+# The published schemas are open (unknown fields are allowed), so that a client never breaks on an
+# addition. The tests are stricter: every field any tool returns must be described by its schema.
+
+def strict(schema):
+    """A copy of a JSON schema in which objects with declared properties accept nothing else."""
+    if isinstance(schema, list):
+        return [strict(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {key: strict(value) for key, value in schema.items()}
+    if "properties" in out and "additionalProperties" not in out:
+        out["additionalProperties"] = False
+    return out
+
+
+_VALIDATORS: dict = {}
+
+
+def check_schema(tool: str, payload: dict, schema: dict | None = None) -> None:
+    """Fail unless `payload` (a complete response, including `tool`) fits the tool's output schema exactly."""
+    from jsonschema import Draft202012Validator
+    from pydantic import TypeAdapter
+
+    if schema is None:
+        if tool not in _VALIDATORS:
+            _VALIDATORS[tool] = Draft202012Validator(strict(TypeAdapter(schemas.RESULT_TYPES[tool]).json_schema()))
+        validator = _VALIDATORS[tool]
+    else:
+        validator = Draft202012Validator(strict(schema))
+    errors = [f"{'/'.join(map(str, e.absolute_path))}: {e.message[:300]}" for e in validator.iter_errors(payload)]
+    assert not errors, f"{tool} response does not fit its output schema: {errors[:5]}"
+
+
+@pytest.fixture(autouse=True)
+def _every_service_result_fits_its_schema(monkeypatch):
+    """Check the result of every tool call made by any test against the tool's output schema."""
+    for tool in schemas.RESULT_TYPES:
+        original = getattr(Service, tool)
+
+        def checked(self, *args, _original=original, _tool=tool, **kwargs):
+            result = _original(self, *args, **kwargs)
+            check_schema(_tool, json.loads(json.dumps({"tool": _tool, **result})))
+            return result
+
+        monkeypatch.setattr(Service, tool, checked)

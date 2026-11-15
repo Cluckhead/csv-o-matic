@@ -106,10 +106,13 @@ def test_listing_is_paged(env):
 def test_only_mapped_folders_and_plain_filenames_are_reachable(env, service):
     (env[0] / "secret").mkdir()
     (env[0] / "secret" / "s.csv").write_text("a\n1\n")
-    for folder in ("secret", "stage/a/../../secret", "/etc", ""):
+    for folder in ("secret", "/etc", ""):
         with pytest.raises(ToolFailure) as info:
             service.list_csv_files(folder)
         assert info.value.kind == "folder_not_found"
+    with pytest.raises(ToolFailure) as info:
+        service.list_csv_files("stage/a/../../secret")
+    assert info.value.kind == "folder_not_allowed"
     for name in ("../../secret/s.csv", "/etc/passwd", "..", ""):
         with pytest.raises(ToolFailure) as info:
             service.inspect_csv_headers(A, name)

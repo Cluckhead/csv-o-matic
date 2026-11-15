@@ -189,6 +189,27 @@ class FolderRef:
     path: str  # as declared (normalised); this is what callers pass as `folder`
     resolved: Path
     usages: list[tuple[ProcessMap, Folder]]
+    # Set for a subfolder discovered beneath a mapped folder: the `path` of that mapped folder.
+    # A subfolder inherits everything the maps say about its mapped root.
+    root_path: str | None = None
+    relative_parts: tuple[str, ...] = ()  # the directory names leading from the mapped folder down to it
+
+    @property
+    def mapped_root(self) -> str:
+        return self.root_path or self.path
+
+    @property
+    def kind(self) -> str:
+        return "subfolder" if self.root_path else "mapped_root"
+
+    def child(self, relative: str) -> "FolderRef":
+        """A subfolder of this mapped folder. The caller has checked that it really is one."""
+        return FolderRef(os.path.join(self.path, relative), self.resolved / relative, self.usages, self.path,
+                         Path(relative).parts)
+
+    @property
+    def record_key_columns(self) -> list[str]:
+        return next((f.record_key_columns for _, f in self.usages if f.record_key_columns), [])
 
     @property
     def primary(self) -> Folder:
@@ -248,6 +269,24 @@ class Catalog:
             if any(wanted == _normalise(f.path) for _, f in ref.usages):
                 return ref
         return None
+
+    def find_root_of(self, folder: str) -> tuple[FolderRef, list[str]] | None:
+        """The mapped folder whose path is a proper prefix of `folder`, and the components below it.
+
+        This is a match on the text only; the caller must check each component on disk.
+        """
+        wanted = _normalise(folder)
+        best: tuple[int, FolderRef, str] | None = None
+        for ref in self.folders():
+            for prefix in {ref.path, str(ref.resolved), *(_normalise(f.path) for _, f in ref.usages)}:
+                if prefix == ".":
+                    rest = "" if os.path.isabs(wanted) else wanted
+                else:
+                    stem = prefix.rstrip(os.sep) + os.sep
+                    rest = wanted[len(stem):] if wanted.startswith(stem) else ""
+                if rest and (best is None or len(prefix) > best[0]):
+                    best = (len(prefix), ref, rest)
+        return (best[1], best[2].split(os.sep)) if best else None
 
 
 def _normalise(path: str) -> str:
