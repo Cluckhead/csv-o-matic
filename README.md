@@ -18,9 +18,10 @@ interpreting results is left to the LLM.
 - **Refuses to guess.** A file it cannot read reliably (wrong encoding, wrong delimiter, broken
   quoting, no header, changing while read) gets an explanation, never a false "absent".
 
-**New to it?** Open [`docs/guide.html`](docs/guide.html) in a browser: a one-page guide to the
-nine tools, from the basic idea to large files, comparisons and broken files, with real
-responses from invented data.
+**New to it?** Open [`docs/field-guide.html`](docs/field-guide.html) in a browser: a one-page
+guide to the nine tools, from the basic idea to large files, comparisons and broken files, with
+real responses from invented data and interactive models. The earlier version of the guide is
+kept as [`docs/guide.html`](docs/guide.html).
 
 ## Quick start
 
@@ -312,7 +313,8 @@ Measured on a 4-core cloud VM with the file in the page cache (2 GB files):
 | Every field quoted | ~175-185 MB/s | 63 MB | 3-15 ms |
 
 Real speeds depend on storage: on a network share, I/O will usually be the limit. Files with
-bare CR line ends are parsed in full and are much slower (about 18 MB/s in one test).
+bare CR line ends are parsed in full and are much slower: about 55 MB/s in one test on a
+300 MB file, against about 650 MB/s for the same data with LF line ends.
 
 ## Layout
 
@@ -324,7 +326,8 @@ src/csv_o_matic/
   service.py       the nine tools as plain functions
   server.py        MCP wiring: tool definitions, progress, cancellation, concurrency
 process_maps/      example process maps
-docs/guide.html    one-page guide to the tools (refresh its examples with scripts/build_guide.py)
+docs/field-guide.html  guide to the tools (refresh examples: scripts/build_guide.py --guide docs/field-guide.html)
+docs/guide.html    the earlier guide (refresh examples: scripts/build_guide.py)
 scripts/           sample data generator, guide builder, pandas check, large-file acceptance check
 tests/
 ```

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Refresh the example responses embedded in docs/guide.html.
+"""Refresh the example responses embedded in a guide page (docs/guide.html by default).
 
 The guide's examples are real output: this script generates the invented sample data, runs
 each example call through the MCP server, and writes the responses into the guide between
 its EXAMPLES markers. Run it after changing the server or the sample data.
 
     python scripts/build_guide.py                    # update docs/guide.html in place
+    python scripts/build_guide.py --guide docs/field-guide.html   # update another page with the same markers
     python scripts/build_guide.py --fragment out.html   # also write the page without its <html> wrapper
 """
 
@@ -111,6 +112,8 @@ EXAMPLES: dict[str, tuple[str, dict]] = {
         "filename_b": "sm_normalised_20261113_20261113T211500.csv", "identifier": "GB0006291573",
         "identifier_column_a": "ISIN", "column_mapping": {"ISIN": "isin"},
         "compare_columns": ["ISIN"]}),
+    "find_wrong_column": ("find_security_in_file", {"folder": CUSTODIAN, "filename": CUST_13, "identifier": "PF003",
+                                                     "identifier_column": "SecurityId"}),
     "err_column": ("find_security_in_file", {"folder": GOLDEN, "filename": GOLD_2115, "identifier": "0417382",
                                              "identifier_column": "SEDOL"}),
     "err_file": ("count_matching_rows", {"folder": GOLDEN, "filename": "security_master_20261113_20261113T211600.csv",
@@ -169,7 +172,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fragment", type=Path, help="Also write the page without its <html>/<head>/<body> wrapper")
     parser.add_argument("--dump", type=Path, help="Also write the examples as a JSON file")
+    parser.add_argument("--guide", type=Path, default=GUIDE, help="Page to update (default: docs/guide.html)")
     args = parser.parse_args()
+    guide = args.guide.resolve()
 
     with tempfile.TemporaryDirectory() as tmp:
         data = Path(tmp) / "sample_data"
@@ -182,14 +187,14 @@ def main() -> None:
     blob = json.dumps(examples, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     if args.dump:
         args.dump.write_text(json.dumps(examples, ensure_ascii=False, indent=1), encoding="utf-8")
-    if GUIDE.exists():
-        page = GUIDE.read_text(encoding="utf-8")
+    if guide.exists():
+        page = guide.read_text(encoding="utf-8")
         if START not in page or END not in page:
-            sys.exit(f"{GUIDE} has no {START} ... {END} block")
+            sys.exit(f"{guide} has no {START} ... {END} block")
         block = f'{START}\n<script type="application/json" id="examples">{blob}</script>\n{END}'
         page = page[: page.index(START)] + block + page[page.index(END) + len(END):]
-        GUIDE.write_text(page, encoding="utf-8")
-        print(f"{len(examples)} examples written into {GUIDE.relative_to(ROOT)} ({len(blob) / 1024:.0f} KB)")
+        guide.write_text(page, encoding="utf-8")
+        print(f"{len(examples)} examples written into {guide.relative_to(ROOT)} ({len(blob) / 1024:.0f} KB)")
         if args.fragment:
             parts = re.findall(r"<!--PAGE:(?:HEAD|BODY)-->(.*?)<!--/PAGE:(?:HEAD|BODY)-->", page, flags=re.S)
             args.fragment.write_text("\n".join(part.strip("\n") for part in parts) + "\n", encoding="utf-8")
