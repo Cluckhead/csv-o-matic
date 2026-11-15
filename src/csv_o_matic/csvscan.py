@@ -27,14 +27,26 @@ import csv
 import re
 import threading
 import time
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import BinaryIO, Iterator
+from typing import BinaryIO
 
 UTF8_BOM = b"\xef\xbb\xbf"
 
-# The csv module's field limit is process-wide. Record length is enforced here instead, per scan
-# (max_record_bytes), so lift the module's limit out of the way once rather than juggle it.
-csv.field_size_limit(2**31 - 1)
+_field_limit_lock = threading.Lock()
+
+
+def _allow_fields_of(length: int) -> None:
+    """Make sure the csv module accepts a field of `length` characters.
+
+    Record length is enforced here, per scan (max_record_bytes). The csv module's own field
+    limit is process-wide, so it is only touched when a scan needs it, and only ever raised:
+    a host process that set a higher limit keeps it.
+    """
+    if csv.field_size_limit() < length:
+        with _field_limit_lock:
+            if csv.field_size_limit() < length:
+                csv.field_size_limit(length)
 
 
 class CsvParseError(Exception):
@@ -56,7 +68,11 @@ class Record:
 
 @dataclass
 class ScanControl:
-    """Shared between a scanning thread and the task supervising it."""
+    """Shared between a scanning thread and the task supervising it: limits one way, progress the other.
+
+    One control covers a whole tool call, which may scan more than one file. What a single
+    scan found out about its file is reported separately, in a `ScanResult`.
+    """
 
     max_seconds: float | None = None
     stop: threading.Event = field(default_factory=threading.Event)
@@ -67,19 +83,15 @@ class ScanControl:
     bytes_done: int = 0
     matches: int = 0
     phase: str = "queued"
-    # Set by iter_records when it stops by itself.
-    stop_reason: str | None = None  # end_of_file | cancelled | time_limit
-    resume_offset: int = 0
-    resume_record: int = 0
-    unterminated_quote_at_eof: bool = False
-    undecodable_lines: int = 0  # parsed lines holding bytes that are not valid in the file's encoding
-    # The search value encoded in encodings other than the declared one, and which of them were seen.
-    alt_needles: dict[str, bytes] = field(default_factory=dict)
-    alt_hits: set[str] = field(default_factory=set)
 
     def begin(self) -> None:
         if self.started is None:
             self.started = time.monotonic()
+
+    def file_finished(self, size: int) -> None:
+        """Progress now counts a file of `size` bytes as done and the next one as not begun."""
+        self.bytes_base += size
+        self.bytes_done = 0
 
     @property
     def elapsed(self) -> float:
@@ -91,6 +103,18 @@ class ScanControl:
         if self.max_seconds is not None and self.elapsed >= self.max_seconds:
             return "time_limit"
         return None
+
+
+@dataclass
+class ScanResult:
+    """What one `iter_records` call found out. Filled in as the scan runs; use a fresh one per scan."""
+
+    stop_reason: str | None = None  # set when the scan stops by itself: end_of_file | cancelled | time_limit
+    resume_offset: int = 0
+    resume_record: int = 0
+    unterminated_quote_at_eof: bool = False
+    undecodable_lines: int = 0  # parsed lines holding bytes that are not valid in the file's encoding
+    alt_hits: set[str] = field(default_factory=set)  # other encodings the search value was seen in
 
 
 def prefilter_needle(value: str, encoding: str) -> bytes | None:
@@ -149,21 +173,21 @@ class _Lines:
     per line.
     """
 
-    def __init__(self, body: bytes, encoding: str, universal: bool, control: ScanControl):
+    def __init__(self, body: bytes, encoding: str, universal: bool, result: ScanResult):
         self._body = body
         self._encoding = encoding
         self._universal = universal
-        self._control = control
+        self._result = result
         self._lf = self._cr = -2  # next LF / CR at or after the last position asked about
         self.pos = 0
         self.overrun = False  # csv.reader wanted a line beyond those available
 
-    def start(self, pos: int) -> "_Lines":
+    def start(self, pos: int) -> _Lines:
         self.pos = pos
         self.overrun = False
         return self
 
-    def __iter__(self) -> "_Lines":
+    def __iter__(self) -> _Lines:
         return self
 
     def __next__(self) -> str:
@@ -183,11 +207,11 @@ class _Lines:
         try:
             return body[pos:end].decode(self._encoding)
         except UnicodeDecodeError:
-            self._control.undecodable_lines += 1
+            self._result.undecodable_lines += 1
             return body[pos:end].decode(self._encoding, errors="replace")
 
 
-def iter_records(
+def iter_records(  # noqa: C901, PLR0912, PLR0915 - one hot loop, kept in one piece for speed
     fh: BinaryIO,
     *,
     delimiter: str = ",",
@@ -196,16 +220,24 @@ def iter_records(
     start_offset: int = 0,
     start_record: int = 0,
     control: ScanControl | None = None,
+    result: ScanResult | None = None,
+    alt_needles: Mapping[str, bytes] | None = None,
     chunk_bytes: int = 4 * 1024 * 1024,
     max_record_bytes: int = 4 * 1024 * 1024,
 ) -> Iterator[Record]:
     """Yield records from `fh`, starting at a record boundary `start_offset`.
 
     `start_record` is the number of records that precede `start_offset`. When the
-    generator finishes on its own, `control.stop_reason` says why and
-    `control.resume_offset` / `control.resume_record` say where a later scan may resume.
+    generator finishes on its own, `result.stop_reason` says why and
+    `result.resume_offset` / `result.resume_record` say where a later scan may resume.
+
+    `alt_needles` is the search value encoded in encodings other than the declared one;
+    `result.alt_hits` names those whose bytes turned up in the file.
     """
     control = control or ScanControl()
+    result = result if result is not None else ScanResult()
+    alt_needles = alt_needles or {}
+    wanted = needle if needle is not None else b""
     control.begin()
     codec = "utf-8" if encoding == "utf-8-sig" else encoding
     delim = delimiter.encode("ascii")
@@ -242,7 +274,7 @@ def iter_records(
         # The time limit is not applied to the first read, so every call makes progress and a
         # chain of cursors always terminates. Cancellation is honoured at once.
         if reason == "cancelled" or (reason and not first_read):
-            control.stop_reason, control.resume_offset, control.resume_record = reason, offset, rec_no
+            result.stop_reason, result.resume_offset, result.resume_record = reason, offset, rec_no
             return
         first_read = False
         buf = carry + chunk if carry else chunk
@@ -262,8 +294,8 @@ def iter_records(
         # The search value's bytes under another encoding only mean something if the chunk itself
         # reads as that encoding: a cp1252 byte also occurs inside valid UTF-8 sequences.
         looks_utf8: bool | None = None
-        for name, alt in control.alt_needles.items():
-            if name in control.alt_hits or alt not in body:
+        for name, alt in alt_needles.items():
+            if name in result.alt_hits or alt not in body:
                 continue
             if name == "utf-8" or codec == "utf-8":
                 if looks_utf8 is None:
@@ -274,13 +306,14 @@ def iter_records(
                         looks_utf8 = False
                 if (name == "utf-8") != looks_utf8:
                     continue
-            control.alt_hits.add(name)
+            result.alt_hits.add(name)
 
         n = len(body)
+        _allow_fields_of(n)
         pos = 0
         # A bare CR ends a record, which the skipping below does not allow for: parse the lot.
         skipping = needle is not None and not (b"\r" in body and BARE_CR.search(body))
-        lines = _Lines(body, codec, universal=not skipping and b"\r" in body, control=control)
+        lines = _Lines(body, codec, universal=not skipping and b"\r" in body, result=result)
         # Positions of the next needle occurrence and the next quote at or after `pos`:
         # -2 means not looked for yet, -1 means none left in this chunk.
         hit = quote = -2
@@ -289,7 +322,7 @@ def iter_records(
         while pos < n:
             if skipping:
                 if hit != -1 and hit < pos:
-                    hit = body.find(needle, pos)
+                    hit = body.find(wanted, pos)
                 if quote != -1 and quote < pos:
                     quote = body.find(b'"', pos)
                 if hit == -1 and quote == -1:
@@ -315,7 +348,7 @@ def iter_records(
                 reason = control.interruption()
                 if reason:
                     control.bytes_done = offset + pos
-                    control.stop_reason, control.resume_offset, control.resume_record = reason, offset + pos, rec_no
+                    result.stop_reason, result.resume_offset, result.resume_record = reason, offset + pos, rec_no
                     return
             try:
                 fields = next(csv.reader(lines.start(pos), delimiter=delimiter), [])
@@ -337,7 +370,7 @@ def iter_records(
                     read_size = max(chunk_bytes, len(carry))
                     pushed_back = True
                     break
-                control.unterminated_quote_at_eof = True
+                result.unterminated_quote_at_eof = True
             size = lines.pos - pos
             if size > max_record_bytes:
                 offset += pos
@@ -349,4 +382,4 @@ def iter_records(
             offset += n
 
     control.bytes_done = offset
-    control.stop_reason, control.resume_offset, control.resume_record = "end_of_file", offset, rec_no
+    result.stop_reason, result.resume_offset, result.resume_record = "end_of_file", offset, rec_no

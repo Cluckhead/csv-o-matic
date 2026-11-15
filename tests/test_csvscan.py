@@ -8,7 +8,7 @@ import random
 
 import pytest
 
-from csv_o_matic.csvscan import CsvParseError, ScanControl, iter_records, prefilter_needle
+from csv_o_matic.csvscan import CsvParseError, ScanControl, ScanResult, iter_records, prefilter_needle
 
 CHUNKS = [1, 2, 3, 7, 16, 64, 1024, 1 << 20]
 
@@ -19,10 +19,11 @@ def reference(data: bytes, delimiter: str = ",") -> list[list[str]]:
 
 
 def scan(data: bytes, chunk: int, needle: bytes | None = None, **kw):
-    control = kw.pop("control", None) or ScanControl()
-    records = list(iter_records(io.BytesIO(data), chunk_bytes=chunk, needle=needle, control=control,
+    """All records of a scan, and how it ended. Progress is on the `control` a caller passes in."""
+    result = ScanResult()
+    records = list(iter_records(io.BytesIO(data), chunk_bytes=chunk, needle=needle, result=result,
                                 max_record_bytes=kw.pop("max_record_bytes", 1 << 20), **kw))
-    return records, control
+    return records, result
 
 
 CASES = {
@@ -58,10 +59,10 @@ CASES = {
 @pytest.mark.parametrize("chunk", CHUNKS)
 def test_matches_csv_module(name, chunk):
     data = CASES[name]
-    records, control = scan(data, chunk)
+    records, result = scan(data, chunk)
     assert [r.fields for r in records] == reference(data)
     assert [r.number for r in records] == list(range(1, len(records) + 1))
-    assert control.stop_reason == "end_of_file"
+    assert result.stop_reason == "end_of_file"
     # Offsets are record boundaries: rescanning from any of them yields the remaining records.
     for index, record in enumerate(records):
         rest, _ = scan(data, chunk, start_offset=record.offset, start_record=record.number - 1)
@@ -110,8 +111,8 @@ def test_needle_with_quotes_and_newlines_is_still_found():
 
 
 def test_unterminated_quote_at_eof_is_flagged():
-    records, control = scan(b'a,b\n1,"never closed\n2,3\n', 16)
-    assert control.unterminated_quote_at_eof
+    records, result = scan(b'a,b\n1,"never closed\n2,3\n', 16)
+    assert result.unterminated_quote_at_eof
     assert records[-1].fields == ["1", "never closed\n2,3\n"]
 
 
@@ -128,39 +129,39 @@ def test_cancel_and_time_limit_report_a_resumable_position():
     data = b"id,v\n" + b"".join(b"%d,x\n" % i for i in range(5000))
     full, _ = scan(data, 64)
 
-    control = ScanControl()
+    control, result = ScanControl(), ScanResult()
     seen = []
-    for record in iter_records(io.BytesIO(data), chunk_bytes=64, control=control):
+    for record in iter_records(io.BytesIO(data), chunk_bytes=64, control=control, result=result):
         seen.append(record)
         if len(seen) == 100:
             control.stop.set()
-    assert control.stop_reason == "cancelled"
+    assert result.stop_reason == "cancelled"
     assert len(seen) < len(full)
-    rest, _ = scan(data, 64, start_offset=control.resume_offset, start_record=control.resume_record)
+    rest, _ = scan(data, 64, start_offset=result.resume_offset, start_record=result.resume_record)
     assert [(r.number, r.fields) for r in seen + rest] == [(r.number, r.fields) for r in full]
 
     # An expired time limit still lets the first read through, so every call makes progress ...
-    control = ScanControl(max_seconds=0.0)
-    first = list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control))
-    assert control.stop_reason == "time_limit" and 0 < len(first) < 20 and control.resume_offset > 0
-    rest, _ = scan(data, 64, start_offset=control.resume_offset, start_record=control.resume_record)
+    control, result = ScanControl(max_seconds=0.0), ScanResult()
+    first = list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control, result=result))
+    assert result.stop_reason == "time_limit" and 0 < len(first) < 20 and result.resume_offset > 0
+    rest, _ = scan(data, 64, start_offset=result.resume_offset, start_record=result.resume_record)
     assert [(r.number, r.fields) for r in first + rest] == [(r.number, r.fields) for r in full]
     # ... and a chain of such calls always reaches the end of the file.
     offset, record, hops = 0, 0, 0
     while True:
-        control = ScanControl(max_seconds=0.0)
-        list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control, start_offset=offset, start_record=record))
+        control, result = ScanControl(max_seconds=0.0), ScanResult()
+        list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control, result=result, start_offset=offset, start_record=record))
         hops += 1
-        if control.stop_reason == "end_of_file":
+        if result.stop_reason == "end_of_file":
             break
-        assert control.resume_offset > offset
-        offset, record = control.resume_offset, control.resume_record
-    assert control.resume_record == len(full) and hops > 100
+        assert result.resume_offset > offset
+        offset, record = result.resume_offset, result.resume_record
+    assert result.resume_record == len(full) and hops > 100
     # Cancellation, unlike the time limit, stops before anything is read.
-    control = ScanControl()
+    control, result = ScanControl(), ScanResult()
     control.stop.set()
-    assert list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control)) == []
-    assert control.stop_reason == "cancelled" and control.resume_offset == 0
+    assert list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control, result=result)) == []
+    assert result.stop_reason == "cancelled" and result.resume_offset == 0
 
 
 def test_other_delimiter_and_encoding():
@@ -195,9 +196,10 @@ def test_skipping_counts_every_record(name, chunk):
     data = CASES[name]
     total = len(reference(data))
     for needle in (b"zzz-not-there", b"1", b"x"):
-        _, control = scan(data, chunk, needle=needle)
-        assert control.stop_reason == "end_of_file" and control.resume_record == total
-        assert control.resume_offset == len(data) and control.bytes_done == len(data)
+        control = ScanControl()
+        _, result = scan(data, chunk, needle=needle, control=control)
+        assert result.stop_reason == "end_of_file" and result.resume_record == total
+        assert result.resume_offset == len(data) and control.bytes_done == len(data)
 
 
 def test_parse_errors_say_where():
@@ -216,8 +218,8 @@ def test_long_cr_only_file_is_read_in_chunks():
     rows = [[str(i), "x" * 20] for i in range(2000)]
     data = b"id,v\r" + b"".join(b"%s,%s\r" % (a.encode(), b.encode()) for a, b in rows)
     for needle in (None, b"1999"):
-        records, control = scan(data, 64, needle=needle, max_record_bytes=256)
-        assert control.resume_record == 2001
+        records, result = scan(data, 64, needle=needle, max_record_bytes=256)
+        assert result.resume_record == 2001
         assert [r.fields for r in records if r.fields[0] == "1999"] == [["1999", "x" * 20]]
 
 
@@ -245,19 +247,19 @@ def test_interruption_inside_a_chunk_of_candidates():
     """Thousands of candidate records in one chunk: a normal scan returns them all; an interrupted one
     stops within about a thousand records and says exactly where to resume."""
     data = b"id,v\n" + b"".join(b"%d,KEY\n" % i for i in range(5000))
-    full, control = scan(data, 1 << 20, needle=b"KEY")
-    assert len(full) == 5000 and control.stop_reason == "end_of_file" and control.resume_record == 5001
+    full, result = scan(data, 1 << 20, needle=b"KEY")
+    assert len(full) == 5000 and result.stop_reason == "end_of_file" and result.resume_record == 5001
 
-    control = ScanControl()
+    control, result = ScanControl(), ScanResult()
     seen = []
-    for record in iter_records(io.BytesIO(data), chunk_bytes=1 << 20, needle=b"KEY", control=control):
+    for record in iter_records(io.BytesIO(data), chunk_bytes=1 << 20, needle=b"KEY", control=control, result=result):
         seen.append(record)
         if len(seen) == 1500:
             control.stop.set()
-    assert control.stop_reason == "cancelled" and 1500 <= len(seen) < 1500 + 1100
-    assert control.resume_offset == seen[-1].end and control.resume_record == seen[-1].number
-    assert control.bytes_done == control.resume_offset
-    rest, _ = scan(data, 1 << 20, needle=b"KEY", start_offset=control.resume_offset, start_record=control.resume_record)
+    assert result.stop_reason == "cancelled" and 1500 <= len(seen) < 1500 + 1100
+    assert result.resume_offset == seen[-1].end and result.resume_record == seen[-1].number
+    assert control.bytes_done == result.resume_offset
+    rest, _ = scan(data, 1 << 20, needle=b"KEY", start_offset=result.resume_offset, start_record=result.resume_record)
     assert [(r.number, r.fields) for r in seen + rest] == [(r.number, r.fields) for r in full]
 
 
@@ -276,17 +278,17 @@ def test_field_larger_than_the_limit_is_reported_as_an_overlong_record():
 
 def test_other_encoding_hits_only_count_when_the_chunk_reads_as_that_encoding():
     def hits(data: bytes, declared: str, alternatives: dict[str, bytes]) -> set[str]:
-        control = ScanControl(alt_needles=alternatives)
-        list(iter_records(io.BytesIO(data), encoding=declared, needle=b"zzz", control=control))
-        return control.alt_hits
+        result = ScanResult()
+        list(iter_records(io.BytesIO(data), encoding=declared, needle=b"zzz", result=result, alt_needles=alternatives))
+        return result.alt_hits
 
-    nbsp_cp1252, nbsp_utf8 = " ".encode("cp1252"), " ".encode("utf-8")
+    nbsp_cp1252, nbsp_utf8 = " ".encode("cp1252"), " ".encode()
     # Declared utf-8: the cp1252 byte inside a valid UTF-8 file is a coincidence ...
-    assert hits("a,b\n ,x\n".encode("utf-8"), "utf-8", {"cp1252": nbsp_cp1252}) == set()
+    assert hits("a,b\n ,x\n".encode(), "utf-8", {"cp1252": nbsp_cp1252}) == set()
     # ... but in a file that is not valid UTF-8 it is evidence.
     assert hits("a,b\n ,é\n".encode("cp1252"), "utf-8", {"cp1252": nbsp_cp1252}) == {"cp1252"}
     # Declared latin-1: UTF-8 bytes count only if the chunk really is UTF-8.
-    assert hits("a,b\n ,x\n".encode("utf-8"), "latin-1", {"utf-8": nbsp_utf8}) == {"utf-8"}
+    assert hits("a,b\n ,x\n".encode(), "latin-1", {"utf-8": nbsp_utf8}) == {"utf-8"}
     assert hits(b"a,b\n\xc2\xa0,\xe9\n", "latin-1", {"utf-8": nbsp_utf8}) == set()
     # Two single-byte encodings cannot be told apart by validity: a hit always counts.
     assert hits(b"a,b\n\x801,x\n", "latin-1", {"cp1252": b"\x801"}) == {"cp1252"}

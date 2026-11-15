@@ -5,10 +5,9 @@ import os
 
 import pytest
 
+from conftest import digest, dumps, make_service
 from csv_o_matic.csvscan import ScanControl
 from csv_o_matic.service import ToolFailure
-
-from conftest import digest, dumps, make_service
 
 A = "stage/a"
 B = "stage/b"
@@ -99,7 +98,7 @@ def test_list_csv_files_filters(service):
 
 
 def test_listing_is_paged(env):
-    out = make_service(env, max_files_per_listing=2).list_csv_files(A, newest_first=False)
+    out = make_service(env, max_files_per_listing=2).list_csv_files(A, descending=False)
     assert out["files_returned"] == 2 and out["truncated"] and out["next_offset"] == 2 and out["total_matching_files"] == 6
 
 

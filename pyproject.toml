@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = ["mcp>=2,<3", "pyyaml>=6", "pydantic>=2", "anyio>=4"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "hypothesis>=6", "pandas>=2"]
+dev = ["pytest>=8", "hypothesis>=6", "pandas>=2", "ruff>=0.6", "mypy>=1.10", "types-PyYAML"]
 
 [project.scripts]
 csv-o-matic = "csv_o_matic.server:main"
@@ -21,3 +21,38 @@ packages = ["src/csv_o_matic"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 150
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "BLE", "C4", "SIM", "RUF", "C90", "PLR0912", "PLR0915"]
+ignore = [
+    "RUF001",  # ambiguous unicode: the tests and messages use them on purpose
+    "SIM108",  # ternaries are not always clearer
+    "SIM110",  # an explicit loop reads better than a nested all()/any()
+    "RUF005",  # list concatenation is fine
+    "C408",    # dict(key=value) is fine
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 20
+
+[tool.ruff.lint.pylint]
+max-branches = 25
+max-statements = 70
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts and tests are linear walkthroughs; the size limits are for the package.
+"scripts/*" = ["C90", "PLR0912", "PLR0915", "B023", "B905", "E501"]
+"tests/*" = ["C90", "PLR0912", "PLR0915", "B905", "E501"]
+"src/csv_o_matic/server.py" = ["E501"]  # each tool parameter keeps its description on one line
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true

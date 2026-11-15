@@ -283,6 +283,7 @@ even under a `.csv` name.
 
 ```bash
 python -m pytest                                              # unit, tool, property and MCP protocol tests
+ruff check . && python -m mypy                                 # lint and type-check (also run in CI)
 python scripts/check_against_pandas.py /path/to/your/file.csv # compare answers with pandas on a real file
 python scripts/acceptance_large_file.py --gb 2                # large-file acceptance
 python scripts/acceptance_large_file.py --gb 2 --style quote_all
@@ -327,7 +328,12 @@ src/csv_o_matic/
   config.py        configuration and limits
   process_maps.py  process map schema, validation, folder inventory
   csvscan.py       streaming CSV reader
-  service.py       the nine tools as plain functions
+  service.py       the nine tools as plain functions: files, headers, scanning
+  search.py        what a search found, and the wording of the answer
+  compare.py       lining up one security's records between two files
+  rows.py          column labels and rows as returned, cut to fit
+  output.py        response size budget and the reserves each tool holds back
+  errors.py        ToolFailure
   server.py        MCP wiring: tool definitions, progress, cancellation, concurrency
 process_maps/      example process maps
 docs/field-guide.html  guide to the tools (refresh examples: scripts/build_guide.py --guide docs/field-guide.html;

@@ -6,8 +6,9 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Callable
 from functools import partial
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any
 
 import anyio
 import anyio.to_thread
@@ -67,7 +68,7 @@ ScanSeconds = Annotated[
 ]
 
 
-def build_server(config: Config, service: Service | None = None) -> MCPServer:
+def build_server(config: Config, service: Service | None = None) -> MCPServer:  # noqa: C901, PLR0915 - one def per tool
     service = service or Service(config)
     limits = config.limits
     scan_slots = anyio.CapacityLimiter(limits.max_concurrent_scans)
@@ -100,9 +101,12 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
             return {"tool": tool, **fn()}, False
         except ToolFailure as failure:
             error = {"type": failure.kind, "message": failure.message, **failure.details}
-        except Exception as exc:  # noqa: BLE001 - report, never crash the session
+        except Exception as exc:
             log.exception("%s failed", tool)
-            error = {"type": "internal_error", "message": f"{type(exc).__name__}: {exc}"}
+            # The exception's text can hold filesystem paths, so it goes to the log, not to the client.
+            error = {"type": "internal_error",
+                     "message": f"An unexpected error ({type(exc).__name__}) stopped this request. "
+                                "Details are in the server log."}
         payload: dict[str, Any] = {"tool": tool}
         if tool in SEARCH_TOOLS:
             payload["outcome"] = "inconclusive"
@@ -118,6 +122,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
     async def scan(ctx: Context, tool: str, request: dict[str, Any], max_scan_seconds: float | None,
                    fn: Callable[[ScanControl], dict[str, Any]]) -> types.CallToolResult:
         """Run a file scan in a worker thread with a slot limit, time limit, progress and cancellation."""
+        request = {**request, "max_scan_seconds": max_scan_seconds}
         budget = limits.max_scan_seconds
         if max_scan_seconds is not None:
             if max_scan_seconds <= 0:
@@ -137,7 +142,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                                f"{control.elapsed:.0f}s of {budget:.0f}s allowed")
                 try:
                     await ctx.report_progress(control.bytes_base + control.bytes_done, control.total_bytes or None, message)
-                except Exception:  # noqa: BLE001 - progress is best-effort
+                except Exception:
                     log.debug("progress notification failed", exc_info=True)
 
         outcome: list[tuple[dict[str, Any], bool]] = []
@@ -203,16 +208,20 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                               "'run_timestamp' (default: the folder's main filename date), or 'filesystem_modified'"),
         ] = None,
         offset: Annotated[int, Field(description="Continue a truncated listing from this next_offset")] = 0,
-        newest_first: Annotated[bool, Field(description="Sort filenames descending (default) or ascending")] = True,
+        descending: Annotated[
+            bool,
+            Field(description="Order of the listing, which is sorted by filename: descending (default) or ascending. "
+                              "Filenames that start with a date token therefore list the latest dates first."),
+        ] = True,
     ) -> types.CallToolResult:
         """List the CSV files that actually exist in one folder right now, with size and filesystem modification
         time, plus the dates/timestamps parsed from each filename according to the folder's naming convention.
         Filesystem modification time and filename dates are reported separately and mean different things.
         Optional filename and date filters narrow the listing."""
         request = {"folder": folder, "filename_contains": filename_contains, "date_from": date_from,
-                   "date_to": date_to, "date_field": date_field, "offset": offset}
+                   "date_to": date_to, "date_field": date_field, "offset": offset, "descending": descending}
         return await quick("list_csv_files", request, lambda: service.list_csv_files(
-            folder, filename_contains, date_from, date_to, date_field, offset, newest_first))
+            folder, filename_contains, date_from, date_to, date_field, offset, descending))
 
     @server.tool(annotations=read_only)
     async def inspect_csv_headers(
@@ -260,7 +269,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         the file. The response states whether the scan completed and whether all matches were returned; when
         results are partial, pass next_cursor to continue."""
         request = {"folder": folder, "filename": filename, "identifier": identifier,
-                   "identifier_column": identifier_column, "columns": columns, "max_rows": max_rows}
+                   "identifier_column": identifier_column, "columns": columns, "max_rows": max_rows, "cursor": cursor}
         return await scan(ctx, "find_security_in_file", request, max_scan_seconds, lambda control:
                           service.find_security_in_file(control, folder, filename, identifier, identifier_column,
                                                         columns, max_rows, cursor))
@@ -279,7 +288,8 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         """Find rows where ANY column equals the identifier exactly - for when you do not know which column
         holds it. Each matching row is returned once, with matched_columns naming every column that matched
         (matched columns are always included in the returned values)."""
-        request = {"folder": folder, "filename": filename, "identifier": identifier, "columns": columns, "max_rows": max_rows}
+        request = {"folder": folder, "filename": filename, "identifier": identifier, "columns": columns, "max_rows": max_rows,
+                   "cursor": cursor}
         return await scan(ctx, "search_across_columns", request, max_scan_seconds, lambda control:
                           service.search_across_columns(control, folder, filename, identifier, columns, max_rows, cursor))
 
@@ -296,7 +306,8 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         """Count the rows whose identifier_column equals the identifier exactly, without returning row contents.
         `count` is only given after a complete scan of the file. If the scan is interrupted, count is null,
         count_is_exact is false, and next_cursor (when present) continues the count."""
-        request = {"folder": folder, "filename": filename, "identifier": identifier, "identifier_column": identifier_column}
+        request = {"folder": folder, "filename": filename, "identifier": identifier, "identifier_column": identifier_column,
+                   "cursor": cursor}
         return await scan(ctx, "count_matching_rows", request, max_scan_seconds, lambda control:
                           service.count_matching_rows(control, folder, filename, identifier, identifier_column, cursor))
 
@@ -338,14 +349,14 @@ def _bounded(value: Any) -> Any:
     if isinstance(value, str):
         return value if len(value) <= 200 else f"{value[:200]}...[{len(value)} characters]"
     if isinstance(value, list):
-        head = [_bounded(v) for v in value[:5]]
-        return head if len(value) <= 5 else head + [f"...and {len(value) - 5} more"]
+        first = [_bounded(v) for v in value[:5]]
+        return first if len(value) <= 5 else [*first, f"...and {len(value) - 5} more"]
     if isinstance(value, dict):
         items = list(value.items())
-        head = {_bounded(k): _bounded(v) for k, v in items[:5]}
+        shown = {_bounded(k): _bounded(v) for k, v in items[:5]}
         if len(items) > 5:
-            head["..."] = f"and {len(items) - 5} more"
-        return head
+            shown["..."] = f"and {len(items) - 5} more"
+        return shown
     return value
 
 

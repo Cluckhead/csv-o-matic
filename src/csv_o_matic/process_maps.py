@@ -41,7 +41,7 @@ class FilenameConvention(_Model):
     notes: str | None = None
 
     @model_validator(mode="after")
-    def _check(self) -> "FilenameConvention":
+    def _check(self) -> FilenameConvention:
         try:
             compiled = re.compile(self.regex)
         except re.error as exc:
@@ -152,7 +152,7 @@ class ProcessMap(_Model):
     notes: str | None = None
 
     @model_validator(mode="after")
-    def _check(self) -> "ProcessMap":
+    def _check(self) -> ProcessMap:
         folder_ids = [f.id for f in self.folders]
         step_ids = [s.id for s in self.steps]
         for kind, ids in (("folder", folder_ids), ("step", step_ids)):
