@@ -1,0 +1,9 @@
+schema_version: "1.1"
+name: fix-map-that-does-not-load
+expected_outcome: |
+  process_maps/corporate_actions.yaml is repaired so the server loads it: the unquoted schedule, the run_ts token,
+  the misspelt filter_rule key and the misspelt folder id are fixed. The problems that would only show up later are
+  fixed too: the announcements filenames carry the date as YYYY-MM-DD, the folder is pipe-delimited, and its
+  identifier columns are spelt Isin and Sedol in the real header. Nothing in the original map is lost.
+context:
+  scaffold_script: place-files.sh
