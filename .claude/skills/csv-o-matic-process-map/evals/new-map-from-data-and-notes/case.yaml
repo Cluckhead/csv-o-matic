@@ -1,0 +1,10 @@
+schema_version: "1.1"
+name: new-map-from-data-and-notes
+expected_outcome: |
+  A new process map for the pricing process is added to process_maps/ and loads under the server's schema.
+  It agrees with the real files: the vendor folder is declared as semicolon-delimited cp1252 with a day-month-year
+  filename date and a sequence number, column names are spelt exactly as in the headers, and the golden security
+  master folder is declared without conflicting with security_master.yaml. The filter rules come from notes.md
+  (CLOSE only, price <= 0, not in golden master) and nothing is invented: points the notes leave open are flagged as open.
+context:
+  scaffold_script: place-files.sh

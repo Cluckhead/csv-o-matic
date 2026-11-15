@@ -121,6 +121,16 @@ steps:
     filter_rules: ["Rows with an empty ISIN are dropped."]
 ```
 
+Writing or repairing a map with Claude Code: the `csv-o-matic-process-map` skill in
+[`.claude/skills/`](.claude/skills/csv-o-matic-process-map/) covers it, and its checker can be run on its own:
+
+```bash
+python .claude/skills/csv-o-matic-process-map/scripts/check_process_map.py --config config.yaml
+```
+
+It applies the server's schema, then compares each map with the real files (filenames against
+the regex, declared columns against the headers, delimiter and encoding).
+
 A folder used by several processes (one process's output is another's input) can be declared
 in each map; the folder inventory merges them by physical path. Only maps that state a
 `csv_format` for the folder have a say in it; if two maps state different formats, files in

@@ -1,0 +1,10 @@
+schema_version: "1.1"
+name: map-from-etl-code
+expected_outcome: |
+  A new process map for the holdings feed is added to process_maps/ and loads under the server's schema.
+  Every way the code can lose a row is written as a filter rule (cancelled/pending status, non-numeric quantity,
+  zero quantity, duplicate fund+ISIN keeping the last, inner join to the golden master), the fork into funds and
+  internal has branch conditions, the internal output is declared tab-delimited and the input latin-1, and
+  filename conventions match what the code writes. The reply says the map was not checked against real files.
+context:
+  scaffold_script: place-files.sh
