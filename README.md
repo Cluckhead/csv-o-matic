@@ -61,6 +61,8 @@ file's directory.
 | --- | --- |
 | `data_root` | Base directory for relative folder paths in process maps |
 | `process_maps_dir` | Directory of process map files (`.yaml`, `.yml`, `.json`) |
+| `allow_unconfined_subfolders` | Where directory-relative opens are unavailable (Windows), read subfolders anyway with a checked, not guaranteed, confinement (default `false`; see [Folder access](#folder-access)) |
+| `text_content` | `full` (default): the text block repeats the whole result as JSON. `summary`: it holds only the conclusion fields; the structured content is unchanged |
 | `limits.max_rows_per_response` | Matching rows returned by one call (default 25) |
 | `limits.max_output_bytes` | Hard ceiling on the size of any tool result: the structured content and the same JSON as text, together (default 120 000, minimum 16 000) |
 | `limits.max_cell_chars` | Longer cell values are cut and flagged (default 2 000) |
@@ -152,6 +154,13 @@ ran but found only partial or inconclusive evidence is not an MCP error; `isErro
 when the request could not be carried out (bad argument, unknown column, invalid cursor,
 unreadable file).
 
+Each schema also states, as an `if`/`then` rule, which fields every response without an `error`
+contains, so a client can rely on them. If the server ever produced a field the schema does not
+describe, that field is dropped (and logged) rather than the answer being withheld; a missing or
+mistyped promised field withholds the response as an `internal_error`. With
+`text_content: summary` the text block carries only the outcome, counts, partiality, cursors,
+warnings, filters and errors, for clients that pass both copies to the model.
+
 ### Folder access
 
 The folders declared in the process maps are the approved roots. A caller can read:
@@ -168,14 +177,25 @@ folder; a parent's listing reports how many subfolders it has but does not searc
 - A folder argument is resolved lexically first (`..` is collapsed, then whole path components
   are compared, so `data` never covers `data_backup`), and must land inside an approved root.
   Relative and absolute spellings are both accepted on that condition only.
-- The folder is then opened from the root one component at a time, refusing any component that
-  is a symbolic link, junction or other reparse point - even one that points back inside the
-  tree. The file is opened relative to the directory that was actually reached, not by path, so
-  swapping a directory for a link mid-request cannot redirect the read. This uses
-  directory-relative opens (`openat` with `O_NOFOLLOW`) on Linux and macOS. On platforms
-  without them (Windows) every component is checked before the open and re-checked after it,
-  and the request fails if anything changed; that narrows the race but cannot close it
-  completely. **The Windows path has not been tested on Windows.**
+- The folder is then opened from the outermost approved root one component at a time, refusing
+  any component that is a symbolic link, junction or other reparse point - even one that points
+  back inside the tree. A mapped folder declared inside another mapped folder is reached the
+  same way, so it cannot be redirected through a link either. The file is opened relative to the
+  directory that was actually reached, not by path, so swapping a directory for a link
+  mid-request cannot redirect the read. This uses directory-relative opens (`openat` with
+  `O_NOFOLLOW`) on Linux and macOS.
+- A top-level mapped folder is opened as declared: if its own declared path is a link, the link
+  is followed. That path is trusted configuration, written by whoever maintains the maps.
+- **Windows.** Without directory-relative opens a subfolder can only be checked before and after
+  the open, which narrows the race but cannot close it. Subfolders are therefore refused there
+  (`subfolder_access_unavailable`) unless `allow_unconfined_subfolders: true` is set; mapped
+  folders themselves still work, and a subfolder can always be declared in a map instead. Names
+  with trailing dots or spaces and device names (`CON`, `NUL`, ...) are refused. **None of this
+  has been tested on Windows.**
+- Names are used exactly as they are: surrounding whitespace is part of a name, and a backslash
+  separates components only on Windows. Every reference returned by `list_folders` leads back to
+  that same directory. Links found in a listing are counted under `links_not_followed` without
+  looking at what they point to.
 - A subfolder inherits its CSV format, filename conventions and identifier columns from the
   most specific mapped folder above it, and responses mark them as inherited. A nested folder
   that is itself declared in a map uses its own declaration, for itself and everything below
@@ -183,7 +203,17 @@ folder; a parent's listing reports how many subfolders it has but does not searc
 - No tool can add a root, edit a process map or change this policy. Roots change only when
   someone edits the map files.
 - Hard links and mount points inside an approved root are followed like ordinary files and
-  directories: they cannot be told apart from them. Keep them out of mapped folders.
+  directories: they cannot be told apart from them. Keep them out of mapped folders. Likewise,
+  a directory that someone moves out of an approved root while a request has it open stays
+  readable for the rest of that request.
+- On a case-insensitive filesystem (macOS by default, Windows), a subfolder spelled in a
+  different case from its mapped declaration, or in a different Unicode normalisation, is
+  treated as an undeclared subfolder of the parent and gets the parent's metadata. It is not an
+  escape, but spell mapped folders as `list_folders` returns them. (Not tested on macOS.)
+- Listings are paged by name: pass `next_start_after` back as `start_after`. The page is chosen
+  without holding the whole directory in memory, and an entry added or removed between pages does
+  not shift the listing. (`next_offset` still works.) Each page reads the whole directory again,
+  so a folder of millions of entries is slow to list.
 
 ### Selecting columns
 
@@ -247,9 +277,12 @@ the scan got and why it stopped.
   established so far (encoding problems, undecodable bytes, near-miss totals), so a clean final
   page cannot turn an earlier "unreliable" into "confirmed absent" or an exact count. They are
   tied to the search, including its filters, and to the physical file: its identity (device and
-  inode), size, modification time and change time. A file replaced by another of the same size
-  and timestamp, or rewritten in place, no longer accepts the old cursor, as does a server
-  restart. Every call ends at a later record than it began, even when one record is longer than
+  inode), size, modification time, and change time as it was when the cursor was issued. A file
+  replaced by another of the same size and timestamp, or rewritten in place, no longer accepts
+  the old cursor, as does a server restart. A metadata-only change (permissions, a hard link
+  added by a backup tool) also invalidates a cursor, since it cannot be told apart from a
+  rewrite that kept the timestamp; it does not, however, spoil the answer of the call during
+  which it happened, which only reports it. Every call ends at a later record than it began, even when one record is longer than
   a read and the time budget is already spent, so a chain of cursors always reaches the end of
   the file.
 - `count_matching_rows` returns `count` only after a complete scan. Otherwise `count` is
@@ -294,8 +327,9 @@ another.
 In comparisons, columns are paired by identical name unless `column_mapping` says otherwise.
 The mapping is `{"A name": "B name"}`, or a list of `{"a": selector, "b": selector}` pairs when
 positions are needed. A name that is repeated in a header is never paired automatically. Every
-mapping entry must resolve and must be used by the request; one that would be ignored is
-refused with `unused_column_mapping`.
+mapping entry must resolve, or the call is refused. An entry the request does not use (its
+column is not compared, keyed or the identifier) is reported under
+`search.unused_column_mapping`, so nobody takes it for a compared column.
 
 `filesystem_modified_time` is when a file was last written on disk. Business dates and run
 timestamps come only from the filename, parsed with the folder's convention, and are returned
@@ -314,9 +348,10 @@ separately as `filename_tokens`.
   has actually stopped.
 - A scan that reaches `max_scan_seconds` (or the caller's lower `max_scan_seconds` argument)
   stops and returns what it found, marked incomplete, with a cursor to continue.
-- `inspect_csv_headers` and `search_column_names` run under the same supervision: scan slot,
-  time limit, progress and cancellation. A sample that stops early says so
-  (`sample_complete: false`, with `sample_stop_reason`).
+- `inspect_csv_headers` and `search_column_names` run under the same time limit, progress and
+  cancellation. Reading only a header is bounded by `max_record_bytes`, so it does not wait for a
+  scan slot behind long scans; a sample, which can read much more, does. A sample that stops
+  early says so (`sample_complete: false`, with `sample_stop_reason`).
 - During a scan the server sends MCP progress notifications (bytes scanned of total, matches
   so far) to clients that supply a progress token.
 - Cancelling the request (`notifications/cancelled`) stops the scan. The stop flag is checked
@@ -398,7 +433,8 @@ python scripts/acceptance_large_file.py --gb 2 --style quote_all
 
 The tests do not only check the code against itself:
 
-- **A second parser.** Property tests generate CSV files and compare every answer with pandas.
+- **A second parser.** Property tests generate CSV files and compare every answer with pandas,
+  filtered searches and counts included.
   `check_against_pandas.py` does the same for any real file you point it at.
 - **The `csv` module.** The scanner is compared with Python's `csv` module on hand-written edge
   cases and about a thousand generated files, including broken quoting and mixed line ends.
@@ -419,7 +455,9 @@ swapped for a link mid-request, with and without directory-relative opens), inte
 across cursor chains, cursors after a file is replaced, progress past records longer than a
 read, column selectors, comparison coverage, record filters, and conformance of every MCP
 response to its published schema. Every service response in the whole suite is also validated
-against its output model.
+against its output model. One test races a real second thread that keeps swapping a directory
+for a link while searches run. The confinement code was also reviewed independently of its
+author, with probes written to try to break it; the findings are fixed and covered by tests.
 
 The acceptance script generates a 120-column file of the requested size and checks results,
 peak memory, time-limit behaviour, cancellation latency and that the file is untouched.

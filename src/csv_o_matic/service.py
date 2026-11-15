@@ -10,20 +10,23 @@ import base64
 import contextlib
 import difflib
 import hashlib
+import heapq
 import hmac
 import json
 import os
 import re
 import secrets
 from dataclasses import dataclass, field
+from pathlib import Path
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, BinaryIO, Iterator
 
+from . import access as access_module
 from .access import AccessError, ConfinedDir
 from .config import Config
 from .csvscan import CsvParseError, Record, ScanControl, iter_records, prefilter_needle
-from .process_maps import Catalog, CsvFormat, FolderRef, ProcessMap, load_catalog
+from .process_maps import Catalog, CsvFormat, FolderRef, Place, ProcessMap, load_catalog
 
 MATCH_TYPE = "exact: whole field value, case-sensitive, compared as text"
 MAX_IDENTIFIER_CHARS = 200
@@ -46,7 +49,6 @@ STOP_EXPLANATIONS = {
     "time_limit": "the scan time limit was reached before the end of the file",
     "cancelled": "the scan was cancelled before the end of the file",
     "too_many_matches": "more matching records were found than one comparison can hold",
-    "no_progress": "the time budget was too small to read even one more record",
 }
 
 
@@ -183,8 +185,15 @@ class Header:
 class Location:
     """A folder the caller may read: an approved root, or a genuine subfolder below one."""
 
-    ref: FolderRef
-    parts: tuple[str, ...] = ()
+    at: Place
+
+    @property
+    def ref(self) -> FolderRef:
+        return self.at.ref
+
+    @property
+    def parts(self) -> tuple[str, ...]:
+        return self.at.parts
 
     @property
     def path(self) -> str:
@@ -208,6 +217,7 @@ class OpenFile:
     ctime_ns: int
     identity: tuple[int, int]  # (device, inode) of the file that is open
     fh: BinaryIO  # opened read-only - the only way files are ever opened
+    end_ctime_ns: int | None = None  # change time when the scan finished, which a cursor is bound to
 
     def info(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -318,6 +328,41 @@ class _Hints:
         return out
 
 
+class _Window:
+    """One page of a directory listing, taken from an unsorted stream of entries without holding them all.
+
+    Keeps only the first `offset + size` entries in name order (descending if `reverse`) that come after
+    `start_after`, and counts every entry offered. Memory is bounded by the page, not the directory.
+    """
+
+    def __init__(self, size: int, offset: int = 0, start_after: str | None = None, reverse: bool = False):
+        self.keep = max(offset, 0) + size
+        self.offset = max(offset, 0)
+        self.size = size
+        self.after = start_after
+        self.reverse = reverse
+        self.total = 0
+        self.remaining = 0  # entries after start_after
+        self._items: list[tuple[str, Any]] = []
+
+    def offer(self, name: str, item: Any) -> None:
+        self.total += 1
+        if self.after is not None and (name >= self.after if self.reverse else name <= self.after):
+            return
+        self.remaining += 1
+        self._items.append((name, item))
+        if len(self._items) > 2 * self.keep + 64:
+            self._trim()
+
+    def _trim(self) -> None:
+        pick = heapq.nlargest if self.reverse else heapq.nsmallest
+        self._items = pick(self.keep, self._items, key=lambda pair: pair[0])
+
+    def page(self) -> list[tuple[str, Any]]:
+        self._trim()
+        return self._items[self.offset: self.offset + self.size]
+
+
 class Service:
     def __init__(self, config: Config):
         self.config = config
@@ -398,11 +443,12 @@ class Service:
             "Call get_process_map again with step_id for one step's mappings, rules and folders.",
         }
 
-    def list_folders(self, process: str | None = None, offset: int = 0, folder: str | None = None) -> dict[str, Any]:
+    def list_folders(self, process: str | None = None, offset: int = 0, folder: str | None = None,
+                     start_after: str | None = None) -> dict[str, Any]:
         if folder is not None and folder.strip():
             if process:
                 raise ToolFailure("invalid_argument", "Pass either process (mapped folders) or folder (its subfolders), not both.")
-            return self._list_subfolders(folder, offset)
+            return self._list_subfolders(folder, offset, start_after)
         catalog = self.catalog()
         proc = self._process(catalog, process) if process else None
         refs = sorted(catalog.folders(proc), key=lambda r: r.path)
@@ -466,11 +512,11 @@ class Service:
             out["process_map_load_errors"] = catalog.load_errors
         return out
 
-    def _list_subfolders(self, folder: str, offset: int) -> dict[str, Any]:
+    def _list_subfolders(self, folder: str, offset: int, start_after: str | None = None) -> dict[str, Any]:
         """The immediate child directories of an approved folder. One level only: the caller descends."""
         loc = self._folder(folder)
         catalog = self.catalog()
-        names: list[str] = []
+        window = _Window(self.limits.max_files_per_listing, offset, start_after)
         links = unreadable = 0
         complete = True
         with self._dir(loc) as directory:
@@ -479,24 +525,22 @@ class Service:
                     for entry in entries:
                         try:
                             if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
-                                links += entry.is_dir()  # a link to a directory: seen, never followed
+                                links += 1  # counted without looking at what it points to
                             elif entry.is_dir(follow_symlinks=False):
-                                names.append(entry.name)
+                                window.offer(entry.name, None)
                         except OSError:
                             unreadable += 1
             except OSError:
                 complete = False  # the listing broke off part-way: what follows is not the whole folder
-        names.sort()
         budget = self.limits.max_output_bytes - ENVELOPE_RESERVE_BYTES
-        start = max(offset, 0)
         page: list[dict[str, Any]] = []
         used = 0
-        for name in names[start: start + self.limits.max_files_per_listing]:
-            child = catalog.locate(f"{loc.path}/{name}")
+        for name, _ in window.page():
+            child = catalog.child(loc.at, name)
             if child is None:  # cannot happen for a real child of an approved folder; never list it if it does
                 unreadable += 1
                 continue
-            place = Location(*child)
+            place = Location(child)
             entry = {"folder": place.path, "name": name, **place.access()}
             if not place.parts:
                 entry["note"] = "Declared in a process map in its own right: its own metadata applies, not its parent's."
@@ -505,11 +549,11 @@ class Service:
                 break
             page.append(entry)
             used += cost
-        more = start + len(page) < len(names)
+        more = window.offset + len(page) < window.remaining
         out: dict[str, Any] = {
             "scope": f"subfolders of '{loc.path}'",
             "parent": {"folder": loc.path, **loc.access()},
-            "total_folders": len(names),
+            "total_folders": window.total,
             "folders_returned": len(page),
             "folders": page,
             "truncated": more,
@@ -518,19 +562,25 @@ class Service:
                     "list_csv_files to see its files. Nothing outside the approved root can be reached.",
         }
         if more:
-            out["next_offset"] = start + len(page)
+            out["next_start_after"] = page[-1]["name"]
+            out["next_offset"] = window.offset + len(page)
         if links:
-            out["linked_folders_not_followed"] = links
+            out["links_not_followed"] = links
         if unreadable:
             out["unreadable_entries"] = unreadable
         if links or unreadable or not complete:
             out["listing_warning"] = (
                 "This is not the whole picture: "
                 + "; ".join(text for text, on in (
-                    (f"{links} linked folder(s) exist here and are never followed", links),
+                    (f"{links} link(s) exist here and are never followed", links),
                     (f"{unreadable} entr(ies) could not be examined", unreadable),
                     ("the folder could not be read to the end", not complete)) if on)
                 + ". An empty or short list here does not show that nothing else exists.")
+        if (any(f["kind"] == "discovered_subfolder" for f in page) and not access_module.HAVE_DIR_FD
+                and not self.config.allow_unconfined_subfolders):
+            out["listing_warning"] = (out.get("listing_warning", "") + " " if "listing_warning" in out else "") + (
+                "On this platform, discovered subfolders cannot be opened with guaranteed confinement, so they "
+                "are listed but cannot be opened (subfolder_access_unavailable).")
         return out
 
     # ------------------------------------------------------------------ files and headers
@@ -552,12 +602,11 @@ class Service:
                 closest_known_folders=difflib.get_close_matches((folder or "")[:300], known, n=5, cutoff=0.4),
                 hint="Call list_folders for the mapped folders, and list_folders with `folder` for their subfolders.",
             )
-        return Location(*located)
+        return Location(located)
 
-    @staticmethod
-    def _dir(loc: Location) -> ConfinedDir:
+    def _dir(self, loc: Location) -> ConfinedDir:
         try:
-            return ConfinedDir(loc.ref.resolved, loc.parts, loc.path)
+            return ConfinedDir(Path(loc.at.anchor), loc.at.anchor_parts, loc.path, self.config.allow_unconfined_subfolders)
         except AccessError as exc:
             raise ToolFailure(exc.kind, exc.message) from None
 
@@ -609,10 +658,16 @@ class Service:
         return OpenFile(loc, filename, fmt, st.st_size, st.st_mtime_ns, st.st_ctime_ns, (st.st_dev, st.st_ino), fh)
 
     def _changed(self, of: OpenFile) -> bool:
-        """Whether the file is no longer the one that was opened: rewritten, or replaced under its name."""
+        """Whether the file's content may differ from what was opened: written to, or replaced under its name.
+
+        Change time is deliberately not part of this: a chmod, a rename elsewhere or a backup tool adding a
+        hard link changes it without touching the content, and must not spoil a correct answer. It is
+        recorded instead (end_ctime_ns) and binds the cursor, so a later page still notices.
+        """
         try:
             st = os.fstat(of.fh.fileno())
-            if (st.st_size, st.st_mtime_ns, st.st_ctime_ns) != (of.size, of.mtime_ns, of.ctime_ns):
+            of.end_ctime_ns = st.st_ctime_ns
+            if (st.st_size, st.st_mtime_ns) != (of.size, of.mtime_ns):
                 return True
             with self._dir(of.loc) as directory:
                 now = directory.lstat(of.name)
@@ -783,7 +838,7 @@ class Service:
 
     def list_csv_files(self, folder: str, filename_contains: str | None = None, date_from: str | None = None,
                        date_to: str | None = None, date_field: str | None = None, offset: int = 0,
-                       newest_first: bool = True) -> dict[str, Any]:
+                       newest_first: bool = True, start_after: str | None = None) -> dict[str, Any]:
         loc = self._folder(folder)
         ref = loc.ref
         conventions = ref.conventions()
@@ -807,7 +862,7 @@ class Service:
                     "Use date_field='filesystem_modified' or filename_contains instead.",
                 )
 
-        files: list[dict[str, Any]] = []
+        files = _Window(self.limits.max_files_per_listing, offset, start_after, reverse=newest_first)
         ignored = subfolders = unparseable = ambiguous = 0
         complete = True
         needle = filename_contains.casefold() if filename_contains else None
@@ -859,26 +914,24 @@ class Service:
                                 continue
                         if field and ((lo and value[:10] < lo) or (hi and value[:10] > hi)):
                             continue
-                        files.append(item)
+                        files.offer(entry.name, item)
             except OSError:
                 complete = False
-        files.sort(key=lambda f: f["filename"], reverse=newest_first)
 
         budget = self.limits.max_output_bytes - ENVELOPE_RESERVE_BYTES
         page: list[dict[str, Any]] = []
         used = 0
-        start = max(offset, 0)
-        for item in files[start: start + self.limits.max_files_per_listing]:
+        for _, item in files.page():
             cost = _size(item) + 4
             if page and used + cost > budget:
                 break
             page.append(item)
             used += cost
-        more = start + len(page) < len(files)
+        more = files.offset + len(page) < files.remaining
         out: dict[str, Any] = {
             "folder": loc.path,
             "filters": {"filename_contains": filename_contains, "date_from": lo, "date_to": hi, "date_field": field},
-            "total_matching_files": len(files),
+            "total_matching_files": files.total,
             "files_returned": len(page),
             "files": page,
             "truncated": more,
@@ -914,7 +967,8 @@ class Service:
                         meanings[name] += f" / {token.meaning}"
             out["time_fields"]["filename_tokens"] = meanings
         if more:
-            out["next_offset"] = start + len(page)
+            out["next_start_after"] = page[-1]["filename"]
+            out["next_offset"] = files.offset + len(page)
         if ignored:
             out["other_entries_ignored"] = ignored
             out["other_entries_note"] = "Entries that are not regular .csv files (other types, links) are not listed or read."
@@ -1171,11 +1225,12 @@ class Service:
         """Binds a cursor to one search of one physical file in one state.
 
         Size and modification time alone do not identify a file: a replacement can match both. The
-        device and inode (the file's identity) and its change time are part of the binding, so a file
-        swapped in under the same name - or rewritten in place - no longer accepts the old cursor.
+        device and inode (the file's identity) are part of the binding, so a file swapped in under the same
+        name no longer accepts the old cursor. The change time is checked separately when a cursor is used
+        (see _decode_cursor), which catches a rewrite in place that kept the size and timestamp.
         """
-        blob = json.dumps([tool, str(of.loc.ref.resolved), list(of.loc.parts), of.name, of.size, of.mtime_ns,
-                           of.ctime_ns, list(of.identity), of.fmt.delimiter, of.fmt.encoding, identifier, column,
+        blob = json.dumps([tool, of.loc.at.anchor, list(of.loc.at.anchor_parts), of.name, of.size, of.mtime_ns,
+                           list(of.identity), of.fmt.delimiter, of.fmt.encoding, identifier, column,
                            [list(f) for f in filters]])
         return hashlib.sha256(blob.encode()).hexdigest()[:24]
 
@@ -1184,7 +1239,7 @@ class Service:
         mac = hmac.new(self._cursor_key, body, hashlib.sha256).digest()[:12]
         return base64.urlsafe_b64encode(mac + body).decode()
 
-    def _decode_cursor(self, cursor: str, fingerprint: str) -> dict[str, Any]:
+    def _decode_cursor(self, cursor: str, fingerprint: str, of: OpenFile) -> dict[str, Any]:
         try:
             raw = base64.urlsafe_b64decode(cursor.encode())
             mac, body = raw[:12], raw[12:]
@@ -1202,6 +1257,14 @@ class Service:
                 "invalid_cursor",
                 "The cursor belongs to a different search, or the file has changed since the cursor was issued. "
                 "Start the search again without a cursor.",
+            )
+        if state.get("c") != of.ctime_ns:
+            raise ToolFailure(
+                "invalid_cursor",
+                f"'{of.name}' has the same size and modification time as when the cursor was issued, but its "
+                "metadata has changed since (its permissions or links changed, or it was rewritten in place "
+                "keeping its timestamp). Earlier pages cannot safely be combined with this one. Start the "
+                "search again without a cursor.",
             )
         return state
 
@@ -1269,6 +1332,12 @@ class Service:
                 f"folder is declared as {of.fmt.encoding}. The declared encoding is probably wrong for this file, so "
                 "values with non-ASCII characters cannot be matched reliably.")
         sound = not warnings
+        if not changed and of.end_ctime_ns is not None and of.end_ctime_ns != of.ctime_ns:
+            # Informational only: the content did not change size or timestamp, so the answer stands.
+            warnings.append("The file's metadata changed while it was being scanned (permissions, links, or a "
+                            "rewrite that kept its size and timestamp). Its size and modification time did not "
+                            "change, so this result stands, but a next_cursor from this response will only be "
+                            "accepted while the file stays as it is now.")
         # A flag, not a count: a record looked at twice (once as look-ahead) must not be counted twice.
         undecodable = bool(control.undecodable_lines or carried.get("u"))
         if undecodable:
@@ -1378,7 +1447,7 @@ class Service:
             carried: dict[str, Any] = {}
             hints = _Hints(identifier)
             if cursor:
-                state = self._decode_cursor(cursor, fingerprint)
+                state = self._decode_cursor(cursor, fingerprint, of)
                 start_offset, start_record, before = state["o"], state["r"], state["m"]
                 carried = state.get("i", {})
                 hints.restore(state.get("h", {}))
@@ -1429,13 +1498,9 @@ class Service:
                 resume = (control.resume_offset, control.resume_record)
             warnings, sound, changed, integrity_state = self._integrity(control, of, header, identifier, carried)
 
+        # iter_records never stops on the time limit before it has passed at least one record, and the row
+        # and size limits stop only after returning one, so every cursor issued points past where this began.
         reached_end = stop_reason == "end_of_file"
-        if (error is None and not reached_end and resume is not None and resume[0] <= start_offset
-                and stop_reason in ("time_limit", "cancelled") and not found):
-            # The scan stopped where it started. Handing back the same cursor would invite an endless retry.
-            if stop_reason == "time_limit":
-                stop_reason = "no_progress"
-            resume = None
         total = before + found
         trustworthy = reached_end and sound
         shown_id = _clip(identifier, 60)
@@ -1474,7 +1539,7 @@ class Service:
         can_resume = error is None and not reached_end and resume is not None and not changed
         next_cursor = None
         if can_resume:
-            state = {"fp": fingerprint, "o": resume[0], "r": resume[1], "m": total}
+            state = {"fp": fingerprint, "c": of.end_ctime_ns, "o": resume[0], "r": resume[1], "m": total}
             if integrity_state:
                 state["i"] = integrity_state
             if hints.state():
@@ -1483,10 +1548,6 @@ class Service:
         why = error.message if error else STOP_EXPLANATIONS.get(stop_reason or "", "the scan stopped early")
         if reached_end:
             why = "the file could not be read reliably (see warnings)"
-        if stop_reason == "no_progress":
-            why = (f"the time budget ran out before a single further record could be read (a record at byte "
-                   f"{start_offset} is longer than one read of {self.limits.chunk_bytes} bytes). Repeating this "
-                   "call with the same budget will stop at the same place: allow more time with max_scan_seconds")
         aside = ""
         if not total and hints:
             aside = f" Not exact matches, but worth checking: {hints.sentence()} (see near_misses)."
@@ -1631,6 +1692,7 @@ class Service:
                                  column_mapping: Any = None,
                                  match_keys: list[Any] | None = None,
                                  filters_a: Any = None, filters_b: Any = None) -> dict[str, Any]:
+        """Find one security in two files and compare it: plan the columns, scan both files, conclude."""
         control.begin()
         control.phase = "opening"
         identifier_b = identifier if identifier_b is None else identifier_b
@@ -1638,7 +1700,6 @@ class Service:
         self._check_identifier(identifier_b)
         if match_keys and len(match_keys) > MAX_MATCH_KEYS:
             raise ToolFailure("invalid_argument", f"At most {MAX_MATCH_KEYS} match_keys are supported.")
-        limit = self.limits.max_output_bytes - RESULT_ENVELOPE_BYTES
         with contextlib.ExitStack() as stack:
             sides: dict[str, OpenFile] = {}
             for key, (folder, filename) in (("a", (folder_a, filename_a)), ("b", (folder_b, filename_b))):
@@ -1646,396 +1707,451 @@ class Service:
                 stack.enter_context(sides[key].fh)
             result: dict[str, Any] = {"file_a": sides["a"].info(), "file_b": sides["b"].info()}
             headers = {key: self._header(of, control) for key, of in sides.items()}
-            head_a, head_b = headers["a"], headers["b"]
-            label_a, label_b = head_a.labels, head_b.labels
-            mapping = self._mapping(head_a, head_b, sides["a"], sides["b"], column_mapping)
-            used_mappings: set[int] = set()
-
-            def counterpart(a: int, what: str) -> int:
-                """The file B column for a file A column: the explicit mapping, else the one column of the same name."""
-                if a in mapping:
-                    used_mappings.add(a)
-                    return mapping[a]
-                same = [j for j, name in enumerate(head_b.columns) if name == head_a.columns[a]]
-                if len(same) == 1:
-                    return same[0]
-                raise ToolFailure(
-                    "column_not_found" if not same else "ambiguous_column",
-                    f"{what} '{_clip(label_a[a], 80)}' of file A has "
-                    + ("no column of the same name" if not same else f"{len(same)} columns of the same name")
-                    + f" in file B ('{sides['b'].name}'). Say which file B column it corresponds to with "
-                      "column_mapping, e.g. [{\"a\": ..., \"b\": {\"position\": N}}].")
-
-            id_a = self._column(head_a, identifier_column_a, sides["a"], "identifier_column_a")
-            if identifier_column_b is not None:
-                id_b = self._column(head_b, identifier_column_b, sides["b"], "identifier_column_b")
-            else:
-                id_b = counterpart(id_a, "identifier column")
-            id_cols = {"a": id_a, "b": id_b}
-
-            only_a: list[str] = []
-            if compare_columns:
-                pairs = [(a, counterpart(a, "compare column"))
-                         for a in self._columns(head_a, compare_columns, sides["a"], "compare_columns")]
-            else:
-                # Default: every mapped column, plus every column whose name occurs exactly once in each file.
-                pairs = []
-                for a, name in enumerate(head_a.columns):
-                    if a in mapping:
-                        pairs.append((a, counterpart(a, "column")))
-                    elif head_a.columns.count(name) == 1 and head_b.columns.count(name) == 1:
-                        pairs.append((a, head_b.columns.index(name)))
-                    else:
-                        only_a.append(head_a.label(a))
-            keys = [(a, counterpart(a, "match key"))
-                    for a in self._columns(head_a, match_keys, sides["a"], "match_keys")] if match_keys else []
-            unused = sorted(set(mapping) - used_mappings)
-            if unused:
-                raise ToolFailure(
-                    "unused_column_mapping",
-                    "column_mapping has entries for file A column(s) that this request never uses: "
-                    f"{_some([label_a[a] for a in unused], 600)}. A mapping only takes effect for a column listed in "
-                    "compare_columns or match_keys, or for the identifier column. Add those columns to "
-                    "compare_columns, or remove the entries; nothing was compared.",
-                    unused_mapping_count=len(unused))
-            predicates = {"a": self._filters(head_a, filters_a, sides["a"], "filters_a"),
-                          "b": self._filters(head_b, filters_b, sides["b"], "filters_b")}
-            used_b = {b for _, b in pairs}
-            identifying = {(id_a, id_b), *keys}
-            substantive = [p for p in pairs if p not in identifying]
-            search: dict[str, Any] = {
-                "identifier_a": identifier, "identifier_column_a": label_a[id_a],
-                "identifier_b": identifier_b, "identifier_column_b": label_b[id_b],
-                "match_type": MATCH_TYPE,
-                "match_keys": [{"a": label_a[a], "b": label_b[b]} for a, b in keys],
-                "compared_column_count": len(pairs),
-                "compared_columns_other_than_identifier_and_keys": len(substantive),
-            }
-            for key in ("a", "b"):
-                if predicates[key]:
-                    search[f"filters_{key}"] = self._describe_filters(headers[key], predicates[key])
-            if predicates["a"] or predicates["b"]:
-                search["scope"] = ("In a file with filters, only records where the identifier matches AND every filter "
-                                   "column equals its value exactly in that same record are considered. Each file's "
-                                   "filters apply to that file's own columns only. 'Absent' for a filtered file means "
-                                   "absent within its filters, not absent from the file.")
-            if compare_columns:
-                listed: list[dict[str, str]] = []
-                room = 2400
-                for a, b in pairs:
-                    entry = {"a": label_a[a], "b": label_b[b]}
-                    room -= _size(entry) + 4
-                    if room < 0:
-                        break
-                    listed.append(entry)
-                search["compared_columns"] = listed
-            else:
-                search["compared_columns"] = (f"all {len(pairs)} columns of file A with exactly one counterpart in "
-                                              "file B (same name, or column_mapping)")
-                only_b = [l for i, l in enumerate(label_b) if i not in used_b]
-                result["columns_not_compared"] = {
-                    "only_in_file_a_count": len(only_a), "only_in_file_a": _some(only_a, 1000),
-                    "only_in_file_b_count": len(only_b), "only_in_file_b": _some(only_b, 1000),
-                    "note": "Columns are paired by identical name unless column_mapping says otherwise; "
-                            "repeated names are not paired.",
-                }
-            if not pairs:
-                search["coverage_warning"] = ("NO columns are paired between the two files, so no field values can be "
-                                              "compared. Supply column_mapping (and compare_columns).")
-            elif not substantive:
-                search["coverage_warning"] = ("The ONLY columns compared are the identifier and match-key columns, "
-                                              "which are equal by construction. This says nothing about any other field.")
-            result["search"] = search
-
-            # Find the security in each file. Both scans share one time budget.
-            cap = self.limits.max_rows_per_response
-            control.total_bytes = sides["a"].size + sides["b"].size
-            records: dict[str, list[Record]] = {"a": [], "b": []}
-            presence: dict[str, dict[str, Any]] = {}
-            warnings: list[str] = []
-            base = 0
-            for key, ident in (("a", identifier), ("b", identifier_b)):
-                of, header = sides[key], headers[key]
-                control.phase = f"scanning file {key.upper()}"
-                control.stop_reason = None
-                hints = _Hints(ident)
-                scoped = bool(predicates[key])
-                reason: str | None = None
-                problem: str | None = None
-                try:
-                    # Filters are applied inside the scan: only records that satisfy them count towards the cap.
-                    for record, _ in self._iter_matches(of, header, ident, id_cols[key],
-                                                        header.data_offset, 1, control, hints, predicates[key]):
-                        if len(records[key]) >= cap:
-                            reason = "too_many_matches"
-                            break
-                        records[key].append(record)
-                except CsvParseError as exc:
-                    reason, problem = "error", _clip(str(exc), 300)
-                except OSError as exc:
-                    reason, problem = "error", f"reading failed part-way: {exc.strerror or exc}"
-                reason = reason or control.stop_reason
-                file_warnings, sound, _, _ = self._integrity(control, of, header, ident)
-                warnings += [f"File {key.upper()}: {text}" for text in file_warnings]
-                complete = reason == "end_of_file" and sound
-                absent = "no_match_within_filters" if scoped else "confirmed_absent"
-                presence[key] = {
-                    "outcome": "match_found" if records[key] else (absent if complete else "inconclusive"),
-                    "matching_records_found": len(records[key]),
-                    "scan_complete": complete,
-                    "stop_reason": reason,
-                }
-                if scoped:
-                    presence[key]["identifier_matches_failing_filters"] = hints.failing_filters
-                    presence[key]["scope"] = "records matching the identifier and this file's filters"
-                if not complete:
-                    presence[key]["explanation"] = (
-                        f"The scan of file {key.upper()} is incomplete or unreliable because "
-                        f"{problem or STOP_EXPLANATIONS.get(reason or '', 'the file could not be read reliably (see warnings)')}"
-                        "; the records found are partial."
-                    )
-                if hints and not records[key]:
-                    presence[key]["near_misses"] = "Not exact matches, but worth checking: " + hints.sentence() + "."
-                base += of.size
-                control.bytes_base = base
-                control.bytes_done = 0
-                if reason in ("cancelled", "time_limit"):
-                    if key == "a":
-                        presence["b"] = {"outcome": "inconclusive", "matching_records_found": 0, "scan_complete": False,
-                                         "stop_reason": "not_scanned",
-                                         "explanation": "File B was not scanned because the scan of file A was interrupted."}
-                    break
-
+            plan = self._plan_comparison(sides, headers, identifier, identifier_b, identifier_column_a,
+                                         identifier_column_b, compare_columns, column_mapping, match_keys,
+                                         filters_a, filters_b)
+            if plan.columns_not_compared is not None:
+                result["columns_not_compared"] = plan.columns_not_compared
+            result["search"] = plan.search
+            records, presence, warnings = self._find_in_both(control, sides, headers, plan, identifier, identifier_b)
         result["presence"] = {"file_a": presence["a"], "file_b": presence["b"]}
         result["elapsed_seconds"] = round(control.elapsed, 2)
         if warnings:
             result["warnings"] = warnings
-        recs_a, recs_b = records["a"], records["b"]
-        # Everything below is added only while it fits; room is kept for the status and explanation.
-        budget = [limit - _size(result) - 3000]
+        report = _ComparisonReport(self, result, plan, self.limits.max_output_bytes - RESULT_ENVELOPE_BYTES)
+        result["comparison_status"], result["explanation"] = report.conclude(records, presence)
+        return result
 
-        def take(cost: int) -> bool:
-            if cost > budget[0]:
-                return False
-            budget[0] -= cost
-            return True
+    def _plan_comparison(self, sides: dict[str, OpenFile], headers: dict[str, Header], identifier: str,
+                         identifier_b: str, identifier_column_a: Any, identifier_column_b: Any,
+                         compare_columns: Any, column_mapping: Any, match_keys: Any, filters_a: Any,
+                         filters_b: Any) -> "_ComparisonPlan":
+        """Resolve every column the comparison uses, in both files, and describe the plan."""
+        head_a, head_b = headers["a"], headers["b"]
+        label_a, label_b = head_a.labels, head_b.labels
+        mapping = self._mapping(head_a, head_b, sides["a"], sides["b"], column_mapping)
+        used_mappings: set[int] = set()
 
-        def cell(record: Record, index: int) -> str | None:
-            """None means the record is too short to have this field: missing, which is not an empty string."""
-            return record.fields[index] if index < len(record.fields) else None
+        def counterpart(a: int, what: str) -> int:
+            """The file B column for a file A column: the explicit mapping, else the one column of the same name."""
+            if a in mapping:
+                used_mappings.add(a)
+                return mapping[a]
+            same = [j for j, name in enumerate(head_b.columns) if name == head_a.columns[a]]
+            if len(same) == 1:
+                return same[0]
+            raise ToolFailure(
+                "column_not_found" if not same else "ambiguous_column",
+                f"{what} '{_clip(label_a[a], 80)}' of file A has "
+                + ("no column of the same name" if not same else f"{len(same)} columns of the same name")
+                + f" in file B ('{sides['b'].name}'). Say which file B column it corresponds to with "
+                  "column_mapping, e.g. [{\"a\": ..., \"b\": {\"position\": N}}].")
 
-        def show(value: str | None) -> str | None:
-            return None if value is None else self._cell(value)[0]
+        id_a = self._column(head_a, identifier_column_a, sides["a"], "identifier_column_a")
+        if identifier_column_b is not None:
+            id_b = self._column(head_b, identifier_column_b, sides["b"], "identifier_column_b")
+        else:
+            id_b = counterpart(id_a, "identifier column")
 
-        def list_records(name: str, recs: list[Record], header: Header, indices: list[int]) -> None:
-            rows = []
-            for record in recs:
-                row = self._fit(self._row(header, record, indices), max(min(budget[0], 4000), 600))
-                if not take(_size(row) + 4):
-                    break
-                rows.append(row)
-            result[name] = rows
-            if len(rows) < len(recs):
-                result[name + "_omitted_for_size"] = len(recs) - len(rows)
+        only_a: list[str] = []
+        if compare_columns:
+            pairs = [(a, counterpart(a, "compare column"))
+                     for a in self._columns(head_a, compare_columns, sides["a"], "compare_columns")]
+        else:
+            # Default: every mapped column, plus every column whose name occurs exactly once in each file.
+            pairs = []
+            for a, name in enumerate(head_a.columns):
+                if a in mapping:
+                    pairs.append((a, counterpart(a, "column")))
+                elif head_a.columns.count(name) == 1 and head_b.columns.count(name) == 1:
+                    pairs.append((a, head_b.columns.index(name)))
+                else:
+                    only_a.append(head_a.label(a))
+        keys = [(a, counterpart(a, "match key"))
+                for a in self._columns(head_a, match_keys, sides["a"], "match_keys")] if match_keys else []
+        unused = sorted(set(mapping) - used_mappings)
+        predicates = {"a": self._filters(head_a, filters_a, sides["a"], "filters_a"),
+                      "b": self._filters(head_b, filters_b, sides["b"], "filters_b")}
+        identifying = {(id_a, id_b), *keys}
+        substantive = [p for p in pairs if p not in identifying]
 
-        def varying(recs: list[Record], header: Header) -> list[str]:
-            names = [label for i, label in enumerate(header.labels) if len({cell(r, i) for r in recs}) == len(recs)]
-            return _some(names[:20], 1000)
-
-        def describe(labels: list[str], indices: list[int], values: tuple) -> dict[str, Any]:
-            return {_clip(labels[i], 60): (None if v is None else _clip(v, 80)) for i, v in zip(indices, values)}
-
-        omitted = {"comparisons": 0, "ambiguous_keys": 0, "unmatched_records_in_file_a": 0,
-                   "unmatched_records_in_file_b": 0, "unalignable_records": 0}
-
-        def add(name: str, item: dict[str, Any]) -> None:
-            if take(_size(item) + 4):
-                result.setdefault(name, []).append(item)
-            else:
-                result.setdefault(name, [])
-                omitted[name] += 1
-
-        def compare_pair(rec_a: Record, rec_b: Record, key: dict[str, Any] | None) -> tuple[bool, bool]:
-            """Add one comparison; returns (any value differs, any field is structurally missing)."""
-            changed, unchanged, missing = [], [], []
+        search: dict[str, Any] = {
+            "identifier_a": identifier, "identifier_column_a": label_a[id_a],
+            "identifier_b": identifier_b, "identifier_column_b": label_b[id_b],
+            "match_type": MATCH_TYPE,
+            "match_keys": [{"a": label_a[a], "b": label_b[b]} for a, b in keys],
+            "compared_column_count": len(pairs),
+            "compared_columns_other_than_identifier_and_keys": len(substantive),
+        }
+        for key in ("a", "b"):
+            if predicates[key]:
+                search[f"filters_{key}"] = self._describe_filters(headers[key], predicates[key])
+        if predicates["a"] or predicates["b"]:
+            search["scope"] = ("In a file with filters, only records where the identifier matches AND every filter "
+                               "column equals its value exactly in that same record are considered. Each file's "
+                               "filters apply to that file's own columns only. 'Absent' for a filtered file means "
+                               "absent within its filters, not absent from the file.")
+        not_compared = None
+        if compare_columns:
+            listed: list[dict[str, str]] = []
+            room = 2400
             for a, b in pairs:
-                va, vb = cell(rec_a, a), cell(rec_b, b)
-                entry: dict[str, Any] = {"column_a": label_a[a]}
-                if label_b[b] != label_a[a]:
-                    entry["column_b"] = label_b[b]
-                if va is None or vb is None:
-                    # A field that is not there is not a value: it neither agrees nor differs.
-                    entry["missing_in"] = [name for name, v in (("file_a", va), ("file_b", vb)) if v is None]
-                    if va is not None:
-                        entry["value_a"] = show(va)
-                    if vb is not None:
-                        entry["value_b"] = show(vb)
-                    missing.append(entry)
-                    continue
-                if va == vb:
-                    entry["value"] = show(va)
-                    unchanged.append(entry)
-                    continue
-                entry["value_a"], entry["value_b"] = show(va), show(vb)
-                note = _difference_note(va, vb)
-                if note:
-                    entry["note"] = note
-                changed.append(entry)
-            out: dict[str, Any] = {} if key is None else {"key": key}
-            out.update({
-                "record_a": {"record_number": rec_a.number, "byte_offset": rec_a.offset},
-                "record_b": {"record_number": rec_b.number, "byte_offset": rec_b.offset},
-                "columns_compared": len(pairs),
-                "changed_count": len(changed), "unchanged_count": len(unchanged), "missing_count": len(missing),
-                "changed": [], "unchanged": [],
-            })
-            if missing:
-                out["missing"] = []
-                out["missing_note"] = ("These fields do not exist in one or both records (the record is shorter than "
-                                       "its header). They were not compared and are not evidence of agreement.")
-            if not take(_size(out) + 800):  # 800: room for the truncation notes below
-                result.setdefault("comparisons", [])
-                omitted["comparisons"] += 1
-                return bool(changed), bool(missing)
-            left_out: list[str] = []
-            for source, target in ((changed, "changed"), (missing, "missing"), (unchanged, "unchanged")):
-                for entry in source:
-                    if take(_size(entry) + 4):
-                        out[target].append(entry)
-                    else:
-                        left_out.append(entry["column_a"])
-            if left_out:
-                out["truncated"] = True
-                out["columns_omitted_for_size_count"] = len(left_out)
-                out["columns_omitted_for_size"] = _some(left_out, 500)
-            else:
-                budget[0] += 800
-            result.setdefault("comparisons", []).append(out)
-            return bool(changed), bool(missing)
+                entry = {"a": label_a[a], "b": label_b[b]}
+                room -= _size(entry) + 4
+                if room < 0:
+                    break
+                listed.append(entry)
+            search["compared_columns"] = listed
+        else:
+            search["compared_columns"] = (f"all {len(pairs)} columns of file A with exactly one counterpart in "
+                                          "file B (same name, or column_mapping)")
+            used_b = {b for _, b in pairs}
+            only_b = [l for i, l in enumerate(label_b) if i not in used_b]
+            not_compared = {
+                "only_in_file_a_count": len(only_a), "only_in_file_a": _some(only_a, 1000),
+                "only_in_file_b_count": len(only_b), "only_in_file_b": _some(only_b, 1000),
+                "note": "Columns are paired by identical name unless column_mapping says otherwise; "
+                        "repeated names are not paired.",
+            }
+        if unused:
+            # Not an error: a caller may pass one general mapping and compare a subset. But say so, so
+            # nobody believes those columns were compared.
+            search["unused_column_mapping"] = {
+                "count": len(unused), "file_a_columns": _some([label_a[a] for a in unused], 800),
+                "note": "These column_mapping entries were valid but not used: a mapping only takes effect for "
+                        "a column in compare_columns or match_keys, or for the identifier column. They were "
+                        "NOT compared."}
+        if not pairs:
+            search["coverage_warning"] = ("NO columns are paired between the two files, so no field values can be "
+                                          "compared. Supply column_mapping (and compare_columns).")
+        elif not substantive:
+            search["coverage_warning"] = ("The ONLY columns compared are the identifier and match-key columns, "
+                                          "which are equal by construction. This says nothing about any other field.")
+        return _ComparisonPlan(head_a, head_b, {"a": id_a, "b": id_b}, pairs, keys, substantive, predicates,
+                               search, not_compared)
 
-        incomplete = not (presence["a"]["scan_complete"] and presence["b"]["scan_complete"])
-        shown_a = [a for a, _ in pairs][:50] or [id_a]
-        shown_b = [b for _, b in pairs][:50] or [id_b]
-        scope_a = " within its filters" if predicates["a"] else ""
-        scope_b = " within its filters" if predicates["b"] else ""
-        if incomplete:
-            status = "inconclusive"
-            text = ("INCONCLUSIVE: at least one file was not scanned completely or could not be read reliably, so "
-                    "presence and record alignment cannot be established. Any record counts above are partial. "
-                    "No comparison was made.")
-        elif not recs_a and not recs_b:
-            status = "absent_from_both"
-            text = (f"Complete scans: no matching record in file A{scope_a} and none in file B{scope_b}."
-                    if scope_a or scope_b else "Complete scans: the security is in neither file.")
-        elif not recs_a or not recs_b:
-            status = "present_in_one_file_only"
+    def _find_in_both(self, control: ScanControl, sides: dict[str, OpenFile], headers: dict[str, Header],
+                      plan: "_ComparisonPlan", identifier: str, identifier_b: str
+                      ) -> tuple[dict[str, list[Record]], dict[str, dict[str, Any]], list[str]]:
+        """Collect the matching records of each file, with what each scan established. One time budget."""
+        cap = self.limits.max_rows_per_response
+        control.total_bytes = sides["a"].size + sides["b"].size
+        records: dict[str, list[Record]] = {"a": [], "b": []}
+        presence: dict[str, dict[str, Any]] = {}
+        warnings: list[str] = []
+        base = 0
+        for key, ident in (("a", identifier), ("b", identifier_b)):
+            of, header = sides[key], headers[key]
+            control.phase = f"scanning file {key.upper()}"
+            control.stop_reason = None
+            hints = _Hints(ident)
+            scoped = bool(plan.predicates[key])
+            reason: str | None = None
+            problem: str | None = None
+            try:
+                # Filters are applied inside the scan: only records that satisfy them count towards the cap.
+                for record, _ in self._iter_matches(of, header, ident, plan.id_cols[key],
+                                                    header.data_offset, 1, control, hints, plan.predicates[key]):
+                    if len(records[key]) >= cap:
+                        reason = "too_many_matches"
+                        break
+                    records[key].append(record)
+            except CsvParseError as exc:
+                reason, problem = "error", _clip(str(exc), 300)
+            except OSError as exc:
+                reason, problem = "error", f"reading failed part-way: {exc.strerror or exc}"
+            reason = reason or control.stop_reason
+            file_warnings, sound, _, _ = self._integrity(control, of, header, ident)
+            warnings += [f"File {key.upper()}: {text}" for text in file_warnings]
+            complete = reason == "end_of_file" and sound
+            absent = "no_match_within_filters" if scoped else "confirmed_absent"
+            presence[key] = {
+                "outcome": "match_found" if records[key] else (absent if complete else "inconclusive"),
+                "matching_records_found": len(records[key]),
+                "scan_complete": complete,
+                "stop_reason": reason,
+            }
+            if scoped:
+                presence[key]["identifier_matches_failing_filters"] = hints.failing_filters
+                presence[key]["scope"] = "records matching the identifier and this file's filters"
+            if not complete:
+                presence[key]["explanation"] = (
+                    f"The scan of file {key.upper()} is incomplete or unreliable because "
+                    f"{problem or STOP_EXPLANATIONS.get(reason or '', 'the file could not be read reliably (see warnings)')}"
+                    "; the records found are partial."
+                )
+            if hints and not records[key]:
+                presence[key]["near_misses"] = "Not exact matches, but worth checking: " + hints.sentence() + "."
+            base += of.size
+            control.bytes_base = base
+            control.bytes_done = 0
+            if reason in ("cancelled", "time_limit"):
+                if key == "a":
+                    presence["b"] = {"outcome": "inconclusive", "matching_records_found": 0, "scan_complete": False,
+                                     "stop_reason": "not_scanned",
+                                     "explanation": "File B was not scanned because the scan of file A was interrupted."}
+                break
+        return records, presence, warnings
+
+
+@dataclass
+class _ComparisonPlan:
+    head_a: Header
+    head_b: Header
+    id_cols: dict[str, int]
+    pairs: list[tuple[int, int]]  # (file A column, file B column) compared for each record pair
+    keys: list[tuple[int, int]]  # match keys
+    substantive: list[tuple[int, int]]  # pairs other than the identifier and the keys
+    predicates: dict[str, list[tuple[int, str]]]
+    search: dict[str, Any]
+    columns_not_compared: dict[str, Any] | None
+
+
+def _cell_at(record: Record, index: int) -> str | None:
+    """None means the record is too short to have this field: missing, which is not an empty string."""
+    return record.fields[index] if index < len(record.fields) else None
+
+
+class _ComparisonReport:
+    """Turns the records found in both files into the comparison part of a response, within the output budget."""
+
+    OMITTABLE = ("comparisons", "ambiguous_keys", "unmatched_records_in_file_a", "unmatched_records_in_file_b",
+                 "unalignable_records")
+
+    def __init__(self, service: "Service", result: dict[str, Any], plan: _ComparisonPlan, limit: int):
+        self.service = service
+        self.result = result
+        self.plan = plan
+        self.label_a, self.label_b = plan.head_a.labels, plan.head_b.labels
+        # Everything below is added only while it fits; room is kept for the status and explanation.
+        self.budget = limit - _size(result) - 3000
+        self.omitted = dict.fromkeys(self.OMITTABLE, 0)
+
+    # -------------------------------------------------------- budgeted output
+
+    def take(self, cost: int) -> bool:
+        if cost > self.budget:
+            return False
+        self.budget -= cost
+        return True
+
+    def add(self, name: str, item: dict[str, Any]) -> None:
+        if self.take(_size(item) + 4):
+            self.result.setdefault(name, []).append(item)
+        else:
+            self.result.setdefault(name, [])
+            self.omitted[name] += 1
+
+    def show(self, value: str | None) -> str | None:
+        return None if value is None else self.service._cell(value)[0]
+
+    def list_records(self, name: str, recs: list[Record], header: Header, indices: list[int]) -> None:
+        rows = []
+        for record in recs:
+            row = self.service._fit(self.service._row(header, record, indices), max(min(self.budget, 4000), 600))
+            if not self.take(_size(row) + 4):
+                break
+            rows.append(row)
+        self.result[name] = rows
+        if len(rows) < len(recs):
+            self.result[name + "_omitted_for_size"] = len(recs) - len(rows)
+
+    def list_both(self, recs_a: list[Record], recs_b: list[Record]) -> None:
+        plan = self.plan
+        self.list_records("records_in_file_a", recs_a, plan.head_a, [a for a, _ in plan.pairs][:50] or [plan.id_cols["a"]])
+        self.list_records("records_in_file_b", recs_b, plan.head_b, [b for _, b in plan.pairs][:50] or [plan.id_cols["b"]])
+
+    @staticmethod
+    def varying(recs: list[Record], header: Header) -> list[str]:
+        names = [label for i, label in enumerate(header.labels) if len({_cell_at(r, i) for r in recs}) == len(recs)]
+        return _some(names[:20], 1000)
+
+    @staticmethod
+    def describe(labels: list[str], indices: list[int], values: tuple) -> dict[str, Any]:
+        return {_clip(labels[i], 60): (None if v is None else _clip(v, 80)) for i, v in zip(indices, values)}
+
+    def compare_pair(self, rec_a: Record, rec_b: Record, key: dict[str, Any] | None) -> tuple[bool, bool]:
+        """Add one comparison; returns (any value differs, any field is structurally missing)."""
+        changed, unchanged, missing = [], [], []
+        for a, b in self.plan.pairs:
+            va, vb = _cell_at(rec_a, a), _cell_at(rec_b, b)
+            entry: dict[str, Any] = {"column_a": self.label_a[a]}
+            if self.label_b[b] != self.label_a[a]:
+                entry["column_b"] = self.label_b[b]
+            if va is None or vb is None:
+                # A field that is not there is not a value: it neither agrees nor differs.
+                entry["missing_in"] = [name for name, v in (("file_a", va), ("file_b", vb)) if v is None]
+                if va is not None:
+                    entry["value_a"] = self.show(va)
+                if vb is not None:
+                    entry["value_b"] = self.show(vb)
+                missing.append(entry)
+                continue
+            if va == vb:
+                entry["value"] = self.show(va)
+                unchanged.append(entry)
+                continue
+            entry["value_a"], entry["value_b"] = self.show(va), self.show(vb)
+            note = _difference_note(va, vb)
+            if note:
+                entry["note"] = note
+            changed.append(entry)
+        out: dict[str, Any] = {} if key is None else {"key": key}
+        out.update({
+            "record_a": {"record_number": rec_a.number, "byte_offset": rec_a.offset},
+            "record_b": {"record_number": rec_b.number, "byte_offset": rec_b.offset},
+            "columns_compared": len(self.plan.pairs),
+            "changed_count": len(changed), "unchanged_count": len(unchanged), "missing_count": len(missing),
+            "changed": [], "unchanged": [],
+        })
+        if missing:
+            out["missing"] = []
+            out["missing_note"] = ("These fields do not exist in one or both records (the record is shorter than "
+                                   "its header). They were not compared and are not evidence of agreement.")
+        if not self.take(_size(out) + 800):  # 800: room for the truncation notes below
+            self.result.setdefault("comparisons", [])
+            self.omitted["comparisons"] += 1
+            return bool(changed), bool(missing)
+        left_out: list[str] = []
+        for source, target in ((changed, "changed"), (missing, "missing"), (unchanged, "unchanged")):
+            for entry in source:
+                if self.take(_size(entry) + 4):
+                    out[target].append(entry)
+                else:
+                    left_out.append(entry["column_a"])
+        if left_out:
+            out["truncated"] = True
+            out["columns_omitted_for_size_count"] = len(left_out)
+            out["columns_omitted_for_size"] = _some(left_out, 500)
+        else:
+            self.budget += 800
+        self.result.setdefault("comparisons", []).append(out)
+        return bool(changed), bool(missing)
+
+    # -------------------------------------------------------- conclusions
+
+    def conclude(self, records: dict[str, list[Record]], presence: dict[str, dict[str, Any]]) -> tuple[str, str]:
+        """The comparison status and its explanation, adding whatever detail supports them."""
+        plan = self.plan
+        recs_a, recs_b = records["a"], records["b"]
+        scope_a = " within its filters" if plan.predicates["a"] else ""
+        scope_b = " within its filters" if plan.predicates["b"] else ""
+        if not (presence["a"]["scan_complete"] and presence["b"]["scan_complete"]):
+            return "inconclusive", (
+                "INCONCLUSIVE: at least one file was not scanned completely or could not be read reliably, so "
+                "presence and record alignment cannot be established. Any record counts above are partial. "
+                "No comparison was made.")
+        if not recs_a and not recs_b:
+            return "absent_from_both", (
+                f"Complete scans: no matching record in file A{scope_a} and none in file B{scope_b}."
+                if scope_a or scope_b else "Complete scans: the security is in neither file.")
+        if not recs_a or not recs_b:
             there, missing_side = ("A", "B") if recs_a else ("B", "A")
             scope_missing = scope_b if recs_a else scope_a
-            text = (f"Complete scans: the security is in file {there} ({len(recs_a or recs_b)} record(s)) and "
-                    + (f"has no matching record in file {missing_side}{scope_missing} (which is not the same as "
-                       "being absent from that file)." if scope_missing else f"absent from file {missing_side}."))
             if recs_a:
-                list_records("records_in_file_a", recs_a, head_a, shown_a)
+                self.list_records("records_in_file_a", recs_a, plan.head_a, [a for a, _ in plan.pairs][:50] or [plan.id_cols["a"]])
             else:
-                list_records("records_in_file_b", recs_b, head_b, shown_b)
-        elif not pairs:
-            status = "no_comparable_columns"
-            text = (f"NO COMPARISON WAS POSSIBLE: the security is present in both files ({len(recs_a)} record(s) in "
-                    f"file A, {len(recs_b)} in file B), but no column of file A is paired with a column of file B, so "
-                    "not one field value was compared. This is not a finding that the records agree. Supply "
-                    "column_mapping to say which columns correspond.")
-            list_records("records_in_file_a", recs_a, head_a, shown_a)
-            list_records("records_in_file_b", recs_b, head_b, shown_b)
-        elif not keys and (len(recs_a) > 1 or len(recs_b) > 1):
-            status = "ambiguous_alignment"
-            text = (f"AMBIGUOUS: file A has {len(recs_a)} matching record(s) and file B has {len(recs_b)}, and no match_keys "
-                    "were given, so records cannot be paired reliably. No comparison was made. Supply match_keys that "
-                    "identify one record per file (see columns_that_differ_between_matches), narrow each file with "
-                    "filters_a / filters_b, or compare specific records using find_security_in_file.")
-            differ = {"file_a": varying(recs_a, head_a), "file_b": varying(recs_b, head_b)}
-            if take(_size(differ) + 100):
-                result["columns_that_differ_between_matches"] = differ
-            list_records("records_in_file_a", recs_a, head_a, shown_a)
-            list_records("records_in_file_b", recs_b, head_b, shown_b)
-        else:
-            key_a, key_b = [a for a, _ in keys], [b for _, b in keys]
-            groups_a: dict[tuple, list[Record]] = {}
-            groups_b: dict[tuple, list[Record]] = {}
-            counts = {"comparisons": 0, "ambiguous_keys": 0, "unmatched_records_in_file_a": 0,
-                      "unmatched_records_in_file_b": 0, "unalignable_records": 0}
-            # A record too short to have a key field has no key: it is set aside, never matched on "nothing".
-            for side, recs, indices, labels, groups in (("file_a", recs_a, key_a, label_a, groups_a),
-                                                        ("file_b", recs_b, key_b, label_b, groups_b)):
-                for rec in recs:
-                    values = tuple(cell(rec, i) for i in indices)
-                    if None in values:
-                        counts["unalignable_records"] += 1
-                        add("unalignable_records", {
-                            "file": side, "record_number": rec.number,
-                            "missing_key_fields": [_clip(labels[i], 60) for i, v in zip(indices, values) if v is None],
-                            "reason": "the record is too short to have this match-key field"})
-                    else:
-                        groups.setdefault(values, []).append(rec)
-            differing = with_missing = 0
-            for key_values, group in groups_a.items():
-                other = groups_b.get(key_values)
-                described = describe(label_a, key_a, key_values)
-                if other is None:
-                    for r in group:
-                        counts["unmatched_records_in_file_a"] += 1
-                        add("unmatched_records_in_file_a", {"record_number": r.number, "key": described})
-                elif len(group) > 1 or len(other) > 1:
-                    counts["ambiguous_keys"] += 1
-                    add("ambiguous_keys", {"key": described, "records_in_file_a": [r.number for r in group],
-                                           "records_in_file_b": [r.number for r in other]})
+                self.list_records("records_in_file_b", recs_b, plan.head_b, [b for _, b in plan.pairs][:50] or [plan.id_cols["b"]])
+            return "present_in_one_file_only", (
+                f"Complete scans: the security is in file {there} ({len(recs_a or recs_b)} record(s)) and "
+                + (f"has no matching record in file {missing_side}{scope_missing} (which is not the same as "
+                   "being absent from that file)." if scope_missing else f"absent from file {missing_side}."))
+        if not plan.pairs:
+            self.list_both(recs_a, recs_b)
+            return "no_comparable_columns", (
+                f"NO COMPARISON WAS POSSIBLE: the security is present in both files ({len(recs_a)} record(s) in "
+                f"file A, {len(recs_b)} in file B), but no column of file A is paired with a column of file B, so "
+                "not one field value was compared. This is not a finding that the records agree. Supply "
+                "column_mapping to say which columns correspond.")
+        if not plan.keys and (len(recs_a) > 1 or len(recs_b) > 1):
+            differ = {"file_a": self.varying(recs_a, plan.head_a), "file_b": self.varying(recs_b, plan.head_b)}
+            if self.take(_size(differ) + 100):
+                self.result["columns_that_differ_between_matches"] = differ
+            self.list_both(recs_a, recs_b)
+            return "ambiguous_alignment", (
+                f"AMBIGUOUS: file A has {len(recs_a)} matching record(s) and file B has {len(recs_b)}, and no match_keys "
+                "were given, so records cannot be paired reliably. No comparison was made. Supply match_keys that "
+                "identify one record per file (see columns_that_differ_between_matches), narrow each file with "
+                "filters_a / filters_b, or compare specific records using find_security_in_file.")
+        return self.pair_and_compare(recs_a, recs_b)
+
+    def pair_and_compare(self, recs_a: list[Record], recs_b: list[Record]) -> tuple[str, str]:
+        """Pair records by their match keys (one record each, or none needed) and compare every pair."""
+        plan = self.plan
+        key_a, key_b = [a for a, _ in plan.keys], [b for _, b in plan.keys]
+        groups: dict[str, dict[tuple, list[Record]]] = {"file_a": {}, "file_b": {}}
+        counts = dict.fromkeys(self.OMITTABLE, 0)
+        # A record too short to have a key field has no key: it is set aside, never matched on "nothing".
+        for side, recs, indices, labels in (("file_a", recs_a, key_a, self.label_a), ("file_b", recs_b, key_b, self.label_b)):
+            for rec in recs:
+                values = tuple(_cell_at(rec, i) for i in indices)
+                if None in values:
+                    counts["unalignable_records"] += 1
+                    self.add("unalignable_records", {
+                        "file": side, "record_number": rec.number,
+                        "missing_key_fields": [_clip(labels[i], 60) for i, v in zip(indices, values) if v is None],
+                        "reason": "the record is too short to have this match-key field"})
                 else:
-                    counts["comparisons"] += 1
-                    differs, lacks = compare_pair(group[0], other[0], described if keys else None)
-                    differing += differs
-                    with_missing += lacks
-            for key_values, group in groups_b.items():
-                if key_values not in groups_a:
-                    described = describe(label_b, key_b, key_values)
-                    for r in group:
-                        counts["unmatched_records_in_file_b"] += 1
-                        add("unmatched_records_in_file_b", {"record_number": r.number, "key": described})
-            left = {name: n for name, n in omitted.items() if n}
-            if left:
-                result["omitted_for_size"] = left
-            compared, ambiguous = counts["comparisons"], counts["ambiguous_keys"]
-            only_in_a, only_in_b = counts["unmatched_records_in_file_a"], counts["unmatched_records_in_file_b"]
-            unalignable = counts["unalignable_records"]
-            result["record_pairs_compared"] = compared
-            coverage = (f"{len(pairs)} column(s) compared per pair"
-                        + f", of which {len(substantive)} other than the identifier and match keys")
-            findings = (f"{differing} pair(s) have at least one differing value"
-                        + (f"; {with_missing} pair(s) have fields missing from a record, which were not compared"
-                           if with_missing else ""))
-            if (ambiguous or unalignable) and not compared:
-                status = "ambiguous_alignment"
-                text = ("AMBIGUOUS: no records could be paired. "
-                        + (f"The match_keys do not identify a single record in each file for {ambiguous} key(s) "
-                           "(see ambiguous_keys); add further match_keys. " if ambiguous else "")
-                        + (f"{unalignable} record(s) are too short to have a match-key field (see "
-                           "unalignable_records). " if unalignable else "")).rstrip()
-            elif ambiguous or only_in_a or only_in_b or unalignable:
-                status = "partially_compared"
-                text = (f"{compared} record pair(s) compared ({coverage}); {findings}. Some "
-                        f"records could not be paired: {ambiguous} ambiguous key(s), {only_in_a} record(s) only in "
-                        f"file A, {only_in_b} only in file B"
-                        + (f", {unalignable} without a usable match key (see unalignable_records)" if unalignable else "")
-                        + ".")
+                    groups[side].setdefault(values, []).append(rec)
+        groups_a, groups_b = groups["file_a"], groups["file_b"]
+        differing = with_missing = 0
+        for key_values, group in groups_a.items():
+            other = groups_b.get(key_values)
+            described = self.describe(self.label_a, key_a, key_values)
+            if other is None:
+                for r in group:
+                    counts["unmatched_records_in_file_a"] += 1
+                    self.add("unmatched_records_in_file_a", {"record_number": r.number, "key": described})
+            elif len(group) > 1 or len(other) > 1:
+                counts["ambiguous_keys"] += 1
+                self.add("ambiguous_keys", {"key": described, "records_in_file_a": [r.number for r in group],
+                                            "records_in_file_b": [r.number for r in other]})
             else:
-                status = "compared"
-                text = f"Complete scans: {compared} record pair(s) compared ({coverage}); {findings}."
-            if compared and not substantive:
-                text += (" ONLY identifier and match-key columns were compared, so this does not show that any "
-                         "other field agrees.")
-            if left:
-                text += " Some detail was left out to fit the output-size limit (see omitted_for_size)."
-        result["comparison_status"] = status
-        result["explanation"] = text
-        return result
+                counts["comparisons"] += 1
+                differs, lacks = self.compare_pair(group[0], other[0], described if plan.keys else None)
+                differing += differs
+                with_missing += lacks
+        for key_values, group in groups_b.items():
+            if key_values not in groups_a:
+                described = self.describe(self.label_b, key_b, key_values)
+                for r in group:
+                    counts["unmatched_records_in_file_b"] += 1
+                    self.add("unmatched_records_in_file_b", {"record_number": r.number, "key": described})
+        left = {name: n for name, n in self.omitted.items() if n}
+        if left:
+            self.result["omitted_for_size"] = left
+        compared, ambiguous = counts["comparisons"], counts["ambiguous_keys"]
+        only_in_a, only_in_b = counts["unmatched_records_in_file_a"], counts["unmatched_records_in_file_b"]
+        unalignable = counts["unalignable_records"]
+        self.result["record_pairs_compared"] = compared
+        coverage = (f"{len(plan.pairs)} column(s) compared per pair, of which {len(plan.substantive)} other than "
+                    "the identifier and match keys")
+        findings = (f"{differing} pair(s) have at least one differing value"
+                    + (f"; {with_missing} pair(s) have fields missing from a record, which were not compared"
+                       if with_missing else ""))
+        if (ambiguous or unalignable) and not compared:
+            status = "ambiguous_alignment"
+            text = ("AMBIGUOUS: no records could be paired. "
+                    + (f"The match_keys do not identify a single record in each file for {ambiguous} key(s) "
+                       "(see ambiguous_keys); add further match_keys. " if ambiguous else "")
+                    + (f"{unalignable} record(s) are too short to have a match-key field (see "
+                       "unalignable_records). " if unalignable else "")).rstrip()
+        elif ambiguous or only_in_a or only_in_b or unalignable:
+            status = "partially_compared"
+            text = (f"{compared} record pair(s) compared ({coverage}); {findings}. Some "
+                    f"records could not be paired: {ambiguous} ambiguous key(s), {only_in_a} record(s) only in "
+                    f"file A, {only_in_b} only in file B"
+                    + (f", {unalignable} without a usable match key (see unalignable_records)" if unalignable else "")
+                    + ".")
+        else:
+            status = "compared"
+            text = f"Complete scans: {compared} record pair(s) compared ({coverage}); {findings}."
+        if compared and not plan.substantive:
+            text += (" ONLY identifier and match-key columns were compared, so this does not show that any "
+                     "other field agrees.")
+        if left:
+            text += " Some detail was left out to fit the output-size limit (see omitted_for_size)."
+        return status, text
 
 
 def _difference_note(a: str | None, b: str | None) -> str | None:

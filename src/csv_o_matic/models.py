@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Outcome = Literal["match_found", "confirmed_absent", "no_match_within_filters", "inconclusive"]
 StopReason = Literal["end_of_file", "row_limit", "output_size_limit", "time_limit", "cancelled", "error",
-                     "no_progress", "too_many_matches", "not_scanned"]
+                     "too_many_matches", "not_scanned"]
 FolderKind = Literal["mapped_folder", "discovered_subfolder"]
 
 
@@ -33,7 +33,20 @@ class ErrorInfo(BaseModel):
     message: str
 
 
+def _publish_guarantees(schema: dict[str, Any], model: type) -> None:
+    """State in the published schema what every response without an `error` contains.
+
+    One object schema per tool keeps clients that expect `type: object` at the root happy; the
+    if/then makes the success guarantees machine-checkable instead of leaving every field optional.
+    """
+    required = list(getattr(model, "required_unless_error", ()))
+    if required:
+        schema["if"] = {"not": {"required": ["error"]}}
+        schema["then"] = {"required": required}
+
+
 class ToolResult(_Out):
+    model_config = ConfigDict(extra="forbid", json_schema_extra=_publish_guarantees)
     required_unless_error: ClassVar[tuple[str, ...]] = ()
 
     tool: str
@@ -170,8 +183,9 @@ class ListFoldersResult(ToolResult):
     folders: list[FolderEntry] | None = None
     truncated: bool | None = None
     next_offset: int | None = None
+    next_start_after: str | None = Field(None, description="Pass as start_after to continue the listing (preferred to next_offset: it stays right if entries are added or removed)")
     listing_complete: bool | None = Field(None, description="False if the folder could not be read to the end")
-    linked_folders_not_followed: int | None = None
+    links_not_followed: int | None = Field(None, description="Links found here; never followed, and their targets are not examined")
     unreadable_entries: int | None = None
     listing_warning: str | None = None
     note: str | None = None
@@ -224,6 +238,7 @@ class ListCsvFilesResult(ToolResult):
     files: list[FileEntry] | None = None
     truncated: bool | None = None
     next_offset: int | None = None
+    next_start_after: str | None = Field(None, description="Pass as start_after to continue the listing")
     sorted_by: str | None = None
     time_fields: TimeFields | None = None
     filename_convention: FilenameConventionInfo | None = None
@@ -396,6 +411,13 @@ class CompareSearch(_Out):
     scope: str | None = None
     compared_columns: str | list[ColumnPairEcho]
     coverage_warning: str | None = None
+    unused_column_mapping: "UnusedMapping | None" = None
+
+
+class UnusedMapping(_Out):
+    count: int
+    file_a_columns: list[str]
+    note: str
 
 
 class ColumnsNotCompared(_Out):

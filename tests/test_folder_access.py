@@ -16,13 +16,18 @@ A = "stage/a"
 SECRET = "ID,Secret\n00123,TOPSECRET\n"
 
 
-@pytest.fixture(params=["directory-relative opens", "fallback without them"])
+@pytest.fixture(params=["directory-relative opens", "fallback, explicitly allowed"])
 def mode(request, monkeypatch):
     """Run each access test both ways: with openat-style confinement, and with the checked-path fallback
-    used where the platform has none (Windows)."""
+    used where the platform has none (Windows), which an administrator must opt in to."""
     if request.param.startswith("fallback"):
         monkeypatch.setattr(access, "HAVE_DIR_FD", False)
     return request.param
+
+
+@pytest.fixture
+def service(env, mode):
+    return make_service(env, allow_unconfined_subfolders=mode.startswith("fallback"))
 
 
 @pytest.fixture
@@ -115,7 +120,7 @@ def test_linked_directories_are_never_a_way_out(tree, service, mode):
     os.symlink(tree / A / "archive", tree / A / "alias")              # even a link that stays inside is not followed
     listing = service.list_folders(folder=A)
     assert [f["name"] for f in listing["folders"]] == ["2026", "archive"]
-    assert listing["linked_folders_not_followed"] == 2 and "does not show that nothing else exists" in listing["listing_warning"]
+    assert listing["links_not_followed"] == 2 and "does not show that nothing else exists" in listing["listing_warning"]
     for folder in ("stage/a/escape", "stage/a/2026/11/deeper", "stage/a/alias", str(tree / A / "escape")):
         for call in (lambda: service.list_csv_files(folder),
                      lambda: service.list_folders(folder=folder),
@@ -209,7 +214,7 @@ def test_subfolder_listings_are_paged_and_bounded(tree, env, mode):
     for i in range(35):
         (tree / A / "archive" / f"run_{i:03d}").mkdir()
         (tree / A / "archive" / f"run_{i:03d}" / "inner").mkdir()  # never read to produce the parent's listing
-    service = make_service(env, max_files_per_listing=10)
+    service = make_service(env, max_files_per_listing=10, allow_unconfined_subfolders=mode.startswith("fallback"))
     seen, offset, pages = [], 0, 0
     while offset is not None:
         page = service.list_folders(folder="stage/a/archive", offset=offset)
@@ -338,3 +343,161 @@ def test_conflicting_csv_formats_are_still_refused_whatever_the_filename(shared,
         with pytest.raises(ToolFailure) as info:
             service.inspect_csv_headers("shared", name)
         assert info.value.kind == "process_map_conflict"
+
+
+def test_without_directory_relative_opens_subfolders_are_refused_unless_allowed(tree, env, monkeypatch):
+    monkeypatch.setattr(access, "HAVE_DIR_FD", False)
+    strict = make_service(env)
+    sub = "stage/a/2026/11"
+    for call in (lambda: strict.list_csv_files(sub),
+                 lambda: strict.list_folders(folder="stage/a/2026"),
+                 lambda: strict.inspect_csv_headers(sub, "deep.csv"),
+                 lambda: strict.find_security_in_file(ScanControl(), sub, "deep.csv", "00123", "ID"),
+                 lambda: strict.compare_security_records(ScanControl(), A, "many.csv", sub, "deep.csv", "DUP", "ID")):
+        assert kind(call) == "subfolder_access_unavailable"
+    # The mapped folders themselves still work, and the listing says why its subfolders cannot be opened.
+    assert strict.count_matching_rows(ScanControl(), A, "many.csv", "DUP", "ID")["count"] == 100
+    listing = strict.list_folders(folder=A)
+    assert [f["name"] for f in listing["folders"]] == ["2026", "archive"] and "cannot be opened" in listing["listing_warning"]
+    allowed = make_service(env, allow_unconfined_subfolders=True)
+    assert allowed.count_matching_rows(ScanControl(), sub, "deep.csv", "00123", "ID")["count"] == 2
+
+
+# ---------------------------------------------------------------- found by an independent review
+
+def nested_map(path: str, folder_id: str = "nested") -> str:
+    return ("id: nested\nname: Nested\ndescription: d\npurpose: p\nrun_semantics: r\n"
+            f"folders:\n  - {{id: {folder_id}, path: '{path}', description: d}}\n"
+            f"steps:\n  - {{id: s, name: s, description: s, writes: [{folder_id}]}}\n")
+
+
+def test_a_root_declared_inside_another_root_is_never_reached_through_a_link(tree, env, service, mode):
+    """Anyone who can write the parent root could otherwise point the nested root anywhere."""
+    os.symlink(tree / "outside", tree / A / "nested")
+    (env[1] / "nested.yaml").write_text(nested_map("stage/a/nested"))
+    for folder in ("stage/a/nested", "stage/a/2026/../nested", str(tree / A / "nested"),
+                   str(tree / "outside"), str(tree / "outside" / "inner")):  # ... nor through the link's target
+        for call in (lambda: service.list_csv_files(folder), lambda: service.list_folders(folder=folder),
+                     lambda: service.search_across_columns(ScanControl(), folder, "secret.csv", "00123")):
+            assert kind(call) in ("linked_folder_not_followed", "folder_not_found"), folder
+    # A genuine nested root is still reached, and still uses its own metadata.
+    os.unlink(tree / A / "nested")
+    (tree / A / "nested").mkdir()
+    (tree / A / "nested" / "n.csv").write_text("ID\nN1\n")
+    assert service.count_matching_rows(ScanControl(), "stage/a/nested", "n.csv", "N1", "ID")["count"] == 1
+    assert service.list_csv_files("stage/a/nested").get("folder_access") is None  # a mapped folder in its own right
+
+
+def test_a_top_level_root_that_is_itself_a_link_is_followed_as_declared(tree, env, service, mode):
+    os.symlink(tree / "outside", tree / "linkroot")
+    (env[1] / "nested.yaml").write_text(nested_map("linkroot", "linkroot"))
+    assert service.count_matching_rows(ScanControl(), "linkroot", "secret.csv", "00123", "ID")["count"] == 1
+    # Its real location is the same approved folder; what lies around either spelling is not.
+    assert service.list_csv_files("outside")["folder"] == "linkroot"
+    for folder in ("linkroot/..", "outside/..", str(tree / "linkroot" / "..")):
+        assert kind(lambda: service.list_csv_files(folder)) == "folder_not_found"
+
+
+def test_listing_does_not_look_at_what_links_point_to(tree, service, mode):
+    for name, target in (("to_dir", tree / "outside"), ("to_file", tree / "outside" / "secret.csv"),
+                         ("dangling", tree / "nowhere")):
+        os.symlink(target, tree / A / "archive" / name)
+    assert service.list_folders(folder="stage/a/archive")["links_not_followed"] == 3  # the same answer for all three
+
+
+@pytest.mark.skipif(os.sep != "/", reason="on Windows a backslash is a separator")
+def test_names_are_used_exactly_as_they_are_on_disk(tree, service, mode):
+    odd = ["b\\..\\2026", " padded ", "x\\..\\..\\..\\..\\outside"]
+    for name in odd:
+        (tree / A / "archive" / name).mkdir()
+        (tree / A / "archive" / name / "f.csv").write_text(f"ID\n{name.strip()[:1]}1\n")
+    listed = {f["name"]: f["folder"] for f in service.list_folders(folder="stage/a/archive")["folders"]}
+    assert set(listed) == set(odd)
+    for name in odd:  # each listed reference leads to that very directory, and nowhere else
+        assert service.list_csv_files(listed[name])["files"][0]["filename"] == "f.csv"
+        assert service.count_matching_rows(ScanControl(), listed[name], "f.csv", f"{name.strip()[:1]}1", "ID")["count"] == 1
+    # Surrounding whitespace in a reference is part of the name, not trimmed away.
+    assert kind(lambda: service.list_csv_files(" stage/a/2026 ")) == "folder_not_found"
+    assert kind(lambda: service.list_csv_files("stage/a/2026\n")) == "folder_not_found"
+
+
+def test_listings_continue_by_name_and_hold_only_one_page(tree, env, mode, monkeypatch):
+    from csv_o_matic import service as service_module
+    for i in range(50):
+        (tree / A / "archive" / f"run_{i:03d}").mkdir()
+        (tree / A / "archive" / f"f_{i:03d}.csv").write_text("ID\n1\n")
+    service = make_service(env, max_files_per_listing=7, allow_unconfined_subfolders=mode.startswith("fallback"))
+    held = []
+    real_trim = service_module._Window._trim
+
+    def watching(self):
+        held.append(len(self._items))
+        real_trim(self)
+    monkeypatch.setattr(service_module._Window, "_trim", watching)
+    for listing, key, names in (
+            (lambda after: service.list_folders(folder="stage/a/archive", start_after=after), "name",
+             [f"run_{i:03d}" for i in range(50)]),
+            (lambda after: service.list_csv_files("stage/a/archive", start_after=after, newest_first=False), "filename",
+             [f"f_{i:03d}.csv" for i in range(50)]),
+            (lambda after: service.list_csv_files("stage/a/archive", start_after=after), "filename",
+             [f"f_{i:03d}.csv" for i in reversed(range(50))])):
+        seen, after = [], None
+        while True:
+            page = listing(after)
+            items = page["folders"] if "folders" in page else page["files"]
+            seen += [item[key] for item in items]
+            after = page.get("next_start_after")
+            if after is None:
+                break
+            assert page["truncated"] and len(items) == 7
+        assert seen == names
+    assert max(held) <= 2 * 7 + 64 + 1  # never the whole directory
+    # An entry added between pages neither shifts the listing nor is repeated.
+    first = service.list_folders(folder="stage/a/archive")
+    (tree / A / "archive" / "run_000a").mkdir()
+    second = service.list_folders(folder="stage/a/archive", start_after=first["next_start_after"])
+    assert second["folders"][0]["name"] == "run_007"
+
+
+@pytest.mark.skipif(not access.HAVE_DIR_FD, reason="the guarantee needs directory-relative opens")
+def test_a_concurrent_attacker_swapping_directories_never_exposes_outside_content(tree, env):
+    """A real race, not a simulated one: another thread keeps swapping an intermediate directory for a
+    link to an outside copy while searches run. Whatever the timing, outside content never appears."""
+    import threading
+    import time
+    service = make_service(env)
+    evil = tree / "outside" / "11"
+    evil.mkdir()
+    (evil / "deep.csv").write_text("ID,Portfolio,Qty\n00123,TOPSECRET,99\n00123,TOPSECRET,98\n")
+    real, parked = tree / A / "2026", tree / A / "2026.parked"
+    stop, swaps = threading.Event(), [0]
+
+    def attacker():
+        while not stop.is_set():
+            os.rename(real, parked)
+            os.symlink(tree / "outside", real)
+            time.sleep(0)
+            os.unlink(real)
+            os.rename(parked, real)
+            swaps[0] += 1
+
+    thread = threading.Thread(target=attacker, daemon=True)
+    thread.start()
+    outcomes = {"genuine": 0, "refused": 0}
+    try:
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            for call in (lambda: service.find_security_in_file(ScanControl(), "stage/a/2026/11", "deep.csv", "00123", "ID"),
+                         lambda: service.list_csv_files("stage/a/2026/11"),
+                         lambda: service.inspect_csv_headers("stage/a/2026/11", "deep.csv", sample_rows=2)):
+                try:
+                    out = call()
+                except ToolFailure:
+                    outcomes["refused"] += 1
+                    continue
+                assert "TOPSECRET" not in str(out)
+                outcomes["genuine"] += 1
+    finally:
+        stop.set()
+        thread.join()
+    assert swaps[0] > 100 and outcomes["genuine"] > 0 and outcomes["refused"] > 0, (swaps, outcomes)

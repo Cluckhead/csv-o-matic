@@ -293,56 +293,106 @@ class Catalog:
         merged: dict[Path, FolderRef] = {}
         for proc in [process] if process else self.processes:
             for folder in proc.folders:
-                declared = Path(folder.path).expanduser()
-                lexical = os.path.normpath(declared if declared.is_absolute() else self.data_root / declared)
+                lexical = self._lexical(folder.path)
                 resolved = Path(os.path.realpath(lexical))
                 ref = merged.get(resolved)
                 if ref is None:
-                    merged[resolved] = ref = FolderRef(_normalise(folder.path), resolved, [], [str(resolved)])
+                    merged[resolved] = ref = FolderRef(_normalise(folder.path), resolved, [], [])
                 ref.usages.append((proc, folder))
                 if lexical not in ref.prefixes:
                     ref.prefixes.append(lexical)
         return list(merged.values())
 
+    def _lexical(self, path: str) -> str:
+        """An absolute path with '.' and '..' collapsed as text, without consulting the disk."""
+        declared = os.path.expanduser(_normalise(path))
+        return os.path.normpath(declared if os.path.isabs(declared) else os.path.join(self.data_root, declared))
+
+    def _anchors(self, refs: list[FolderRef]) -> list[tuple[str, str]]:
+        """(spelling, path to open) for each top-level approved root.
+
+        A root declared inside another root is not an anchor: it is reached by descending from the outer
+        root, so the rule that no link is followed below a root holds for it too. A top-level root is
+        opened as declared (following any link in its own declared path - that is trusted
+        configuration); its real location is accepted as a second spelling.
+        """
+        lexicals = [prefix for ref in refs for prefix in ref.prefixes]
+        out: list[tuple[str, str]] = []
+        for prefix in lexicals:
+            if any(other != prefix and relative_parts(prefix, other) for other in lexicals):
+                continue  # nested inside another root
+            out.append((prefix, prefix))
+            real = os.path.realpath(prefix)
+            if real != prefix:
+                out.append((real, prefix))
+        return out
+
     def find_folder(self, folder: str) -> FolderRef | None:
         """The approved root addressed exactly by `folder`, if any."""
-        located = self.locate(folder)
-        return located[0] if located and not located[1] else None
+        place = self.locate(folder)
+        return place.ref if place and not place.parts else None
 
-    def locate(self, folder: str) -> tuple[FolderRef, tuple[str, ...]] | None:
-        """The approved root governing `folder` and the components below it.
+    def locate(self, folder: str) -> "Place | None":
+        """Where `folder` is: the root to open and the components below it, and the mapped folder whose
+        metadata governs it. None if it is not inside an approved root.
 
-        Purely lexical: nothing is read from disk, and '..' is collapsed before the containment test, so a
-        path can only be located inside a root it is spelled inside. The most specific root wins, which
-        lets an explicitly mapped nested folder override its parent. Whether the components really are
-        plain directories is checked when the folder is opened (see access.py).
+        Purely lexical: nothing is read from disk here, and '..' is collapsed before the containment test,
+        so a path can only be located inside a root it is spelled inside. Whether the components really are
+        plain directories is checked when the folder is opened (see access.py). Text is taken as given:
+        surrounding whitespace is part of a name, and a backslash separates components only on Windows.
         """
         wanted = _normalise(folder)
         if not wanted or "\x00" in wanted:
             return None
         refs = self.folders()
-        for ref in refs:  # exact spellings first: the declared path, or any alias a process declared
-            if wanted == ref.path or any(wanted == _normalise(f.path) for _, f in ref.usages):
-                return ref, ()
-        absolute = os.path.normpath(wanted if os.path.isabs(wanted) else os.path.join(self.data_root, wanted))
+        for ref in refs:  # a declared spelling, or any alias a process declared for the same physical folder
+            for _, declared in ref.usages:
+                if wanted == _normalise(declared.path):
+                    return self._place(refs, self._lexical(declared.path))
+        return self._place(refs, self._lexical(wanted))
+
+    def child(self, place: "Place", name: str) -> "Place | None":
+        """The place of a directory entry found inside `place` (a name from the disk, used as it is)."""
+        return self._place(self.folders(), os.path.join(place.lexical, name))
+
+    def _place(self, refs: list[FolderRef], lexical: str) -> "Place | None":
+        anchor: tuple[str, tuple[str, ...]] | None = None
+        canonical = None
+        for spelling, opened in self._anchors(refs):
+            parts = relative_parts(lexical, spelling)
+            if parts is not None and (anchor is None or len(parts) < len(anchor[1])):
+                anchor, canonical = (opened, parts), os.path.join(os.path.realpath(opened), *parts)
+        if anchor is None:
+            return None
+        # The most specific mapped folder containing it governs its metadata: a nested mapped folder
+        # overrides its parent for its own subtree.
         best: tuple[FolderRef, tuple[str, ...]] | None = None
         for ref in refs:
-            for prefix in ref.prefixes:
-                parts = relative_parts(absolute, prefix)
-                if parts is not None and (best is None or len(parts) < len(best[1])):
-                    best = (ref, parts)
-        if best is not None and best[1]:
-            # The same place spelled through the root's real location may sit inside a more specific root.
-            canonical = os.path.join(str(best[0].resolved), *best[1])
-            for ref in refs:
-                parts = relative_parts(canonical, str(ref.resolved))
-                if parts is not None and len(parts) < len(best[1]):
-                    best = (ref, parts)
-        return best
+            for prefix in [*ref.prefixes, str(ref.resolved)]:
+                for where in (lexical, canonical):
+                    parts = relative_parts(where, prefix)
+                    if parts is not None and (best is None or len(parts) < len(best[1])):
+                        best = (ref, parts)
+        if best is None:
+            return None
+        return Place(anchor[0], anchor[1], best[0], best[1], lexical)
+
+
+@dataclass(frozen=True)
+class Place:
+    """A folder the caller may address."""
+
+    anchor: str  # top-level approved root, opened as declared
+    anchor_parts: tuple[str, ...]  # components below it, each opened without following any link
+    ref: FolderRef  # the most specific mapped folder containing it, whose metadata applies
+    parts: tuple[str, ...]  # components below `ref`; empty for a mapped folder itself
+    lexical: str  # the absolute path as spelled
 
 
 def _normalise(path: str) -> str:
-    return os.path.normpath(path.strip().replace("\\", "/")) if path.strip() else ""
+    if not path or not path.strip():
+        return ""
+    return os.path.normpath(path)
 
 
 def load_catalog(maps_dir: Path, data_root: Path) -> Catalog:

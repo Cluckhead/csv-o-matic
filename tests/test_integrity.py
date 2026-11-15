@@ -301,3 +301,38 @@ def test_a_huge_header_line_obeys_the_time_limit_in_both_header_tools(env):
         with pytest.raises(ToolFailure) as info:
             call()
         assert info.value.kind in ("header_not_read", "parse_error")
+
+
+# ---------------------------------------------------------------- metadata-only changes
+
+def test_a_metadata_change_during_the_scan_does_not_spoil_a_correct_answer(env, service, monkeypatch):
+    path = env[0] / A / "many.csv"
+    original = service._iter_matches
+
+    def chmod_midway(*args, **kwargs):
+        yield from original(*args, **kwargs)
+        os.chmod(path, 0o600)  # ctime changes; size, mtime and content do not
+
+    monkeypatch.setattr(service, "_iter_matches", chmod_midway)
+    out = service.count_matching_rows(ScanControl(), A, "many.csv", "nope", "ID")
+    assert out["outcome"] == "confirmed_absent" and out["count"] == 0 and out["count_is_exact"]
+    assert any("metadata changed" in w and "result stands" in w for w in out["warnings"])
+
+
+def test_a_cursor_issued_after_a_metadata_change_still_works_but_a_later_change_rejects_it(env, service, monkeypatch):
+    path = env[0] / A / "many.csv"
+    original = service._iter_matches
+
+    def chmod_midway(*args, **kwargs):
+        yield from original(*args, **kwargs)
+        os.chmod(path, 0o640)
+
+    monkeypatch.setattr(service, "_iter_matches", chmod_midway)
+    page = service.find_security_in_file(ScanControl(), A, "many.csv", "DUP", "ID", max_rows=5)
+    monkeypatch.undo()
+    resumed = service.find_security_in_file(ScanControl(), A, "many.csv", "DUP", "ID", max_rows=5, cursor=page["next_cursor"])
+    assert resumed["matches"][0]["record_number"] == 17  # bound to the state the file was left in
+    os.chmod(path, 0o644)
+    with pytest.raises(ToolFailure) as info:
+        service.find_security_in_file(ScanControl(), A, "many.csv", "DUP", "ID", cursor=resumed["next_cursor"])
+    assert info.value.kind == "invalid_cursor" and "metadata has changed" in info.value.message

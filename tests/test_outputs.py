@@ -153,7 +153,7 @@ def test_successful_partial_and_failed_responses_all_conform(env, files):
                 ("search_across_columns", dict(folder="/etc", filename="passwd.csv", identifier="root"), "folder_not_found"),
                 ("compare_security_records", dict(folder_a=B, filename_a="left.csv", folder_b=B, filename_b="right.csv",
                                                   identifier="00123", identifier_column_a="ID", compare_columns=["Qty"],
-                                                  column_mapping={"ID": "sec_id", "Price": "px"}), "unused_column_mapping"),
+                                                  column_mapping={"ID": "sec_id", "Price": "nope"}), "column_not_found"),
                 ("inspect_csv_headers", dict(folder=A, filename="missing.csv"), "file_not_found"),
                 ("search_column_names", dict(folder="stage/a/../../x", filename="f.csv", term="a"), "folder_not_found"),
                 ("list_folders", dict(folder="/"), "folder_not_found"),
@@ -230,11 +230,17 @@ class Oversized(Service):
 
     def list_csv_files(self, *args, **kwargs):
         out = super().list_csv_files(*args, **kwargs)
-        out["not_in_the_schema"] = True
+        out["not_in_the_schema"] = True  # unknown, but everything promised is there: dropped, answer kept
+        out["files"][0]["also_unknown"] = 1
+        return out
+
+    def search_column_names(self, *args, **kwargs):
+        out = super().search_column_names(*args, **kwargs)
+        out["matching_column_count"] = "two"  # a promised field with the wrong type: the answer is withheld
         return out
 
 
-def test_the_size_backstop_and_a_schema_violation_both_yield_valid_errors_that_conclude_nothing(env):
+def test_the_size_backstop_and_schema_problems_are_handled_without_false_conclusions(env):
     async def main():
         limit = 16000
         cfg = config(env, max_output_bytes=limit)
@@ -247,7 +253,12 @@ def test_the_size_backstop_and_a_schema_violation_both_yield_valid_errors_that_c
             assert out["outcome"] == "inconclusive" and "count" not in out and "count_is_exact" not in out
             assert set(out) == {"tool", "outcome", "explanation", "error"} and result_size(result) < 1500
             out, result = await checked_call(client, schemas, "list_csv_files", limit=limit, folder=A)
-            assert result.is_error and out["error"]["type"] == "internal_error" and "files" not in out
+            assert not result.is_error and out.get("files"), out
+            assert "not_in_the_schema" not in out
+            assert "also_unknown" not in out["files"][0]
+            out, result = await checked_call(client, schemas, "search_column_names", limit=limit, folder=A,
+                                             filename=TRICKY, term="id")
+            assert result.is_error and out["error"]["type"] == "internal_error" and "matching_columns" not in out
     anyio.run(main)
 
 
@@ -343,4 +354,68 @@ def test_progress_is_reported_while_sampling(env, blank_tail):
         assert len(updates) >= 3 and any(m.startswith("sampling") for _, _, m in updates)
         done = [p for p, _, _ in updates]
         assert done == sorted(done) and done[-1] > done[0] and updates[-1][1] == blank_tail.stat().st_size
+    anyio.run(main)
+
+
+def test_published_schemas_state_what_a_response_without_an_error_contains(env):
+    async def main():
+        async with Client(build_server(config(env))) as client:
+            schemas = await published(client)
+        count = schemas["count_matching_rows"]
+        assert count["if"] == {"not": {"required": ["error"]}}
+        assert {"outcome", "count", "count_is_exact", "next_cursor", "scan"} <= set(count["then"]["required"])
+        validator = Draft202012Validator(count)
+        # Leaving out a promised field is a schema violation unless the response reports an error.
+        assert not validator.is_valid({"tool": "count_matching_rows", "outcome": "confirmed_absent"})
+        assert validator.is_valid({"tool": "count_matching_rows", "error": {"type": "x", "message": "y"}})
+        assert all("then" in schemas[name] for name in RESULT_MODELS if name != "get_process_map")
+    anyio.run(main)
+
+
+def test_header_only_reads_do_not_wait_behind_long_scans(env, blank_tail, files):
+    async def main():
+        cfg = config(env, max_concurrent_scans=1)
+        async with Client(build_server(cfg)) as client:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(client.call_tool, "count_matching_rows",
+                              {"folder": A, "filename": "slowish.csv", "identifier": "NEEDLE", "identifier_column": "Other"})
+                await anyio.sleep(0.05)  # the only slot is now taken
+                with anyio.fail_after(1):
+                    headers = await client.call_tool("inspect_csv_headers", {"folder": A, "filename": TRICKY})
+                    names = await client.call_tool("search_column_names", {"folder": A, "filename": TRICKY, "term": "id"})
+                assert headers.structured_content["columns"][0] == "ID" and names.structured_content["matching_column_count"] == 2
+                # A sample may read much more, so it does wait for the slot.
+                with anyio.move_on_after(0.2) as scope:
+                    await client.call_tool("inspect_csv_headers", {"folder": A, "filename": "blank.csv", "sample_rows": 2})
+                assert scope.cancelled_caught
+                tg.cancel_scope.cancel()
+    anyio.run(main)
+
+
+def test_summary_text_mode_keeps_every_conclusion_and_the_full_structured_content(env, files):
+    async def main():
+        cfg = Config(data_root=env[0], process_maps_dir=env[1], limits=Limits(), text_content="summary")
+        async with Client(build_server(cfg)) as client:
+            schemas = await published(client)
+            for tool, args in [
+                ("find_security_in_file", {"folder": A, "filename": "many.csv", "identifier": "DUP", "identifier_column": "ID",
+                                           "max_rows": 3, "filters": [{"column": "Text", "value": "x" * 50}]}),
+                ("count_matching_rows", {"folder": A, "filename": "mis.csv", "identifier": "Ä1", "identifier_column": "ID"}),
+                ("list_csv_files", {"folder": A}),
+                ("search_across_columns", {"folder": "/etc", "filename": "x.csv", "identifier": "1"}),
+            ]:
+                result = await client.call_tool(tool, args)
+                full = result.structured_content
+                errors = [e.message for e in Draft202012Validator(schemas[tool]).iter_errors(full)]
+                assert not errors
+                text = json.loads(result.content[0].text)
+                assert len(result.content[0].text) < len(json.dumps(full)) or tool == "search_across_columns"
+                for key in ("outcome", "count", "count_is_exact", "more_matches", "results_are_partial", "next_cursor",
+                            "warnings", "truncated", "error", "explanation"):
+                    assert text.get(key) == full.get(key), (tool, key)
+                if "filters" in full.get("search", {}):
+                    assert text["search"]["filters"] == full["search"]["filters"]
+                if "scan" in full:
+                    assert text["scan"] == {k: full["scan"][k] for k in ("complete", "stop_reason")}
+                assert "matches" not in text and "files" not in text and "structured content" in text["detail"]
     anyio.run(main)

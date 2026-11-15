@@ -127,9 +127,10 @@ def env(tmp_path: Path):
     return data, maps
 
 
-def make_service(env, **limits) -> Service:
+def make_service(env, *, allow_unconfined_subfolders: bool = False, text_content: str = "full", **limits) -> Service:
     data, maps = env
-    return Service(Config(data_root=data, process_maps_dir=maps, limits=Limits(**limits)))
+    return Service(Config(data_root=data, process_maps_dir=maps, limits=Limits(**limits),
+                          allow_unconfined_subfolders=allow_unconfined_subfolders, text_content=text_content))
 
 
 @pytest.fixture

@@ -136,6 +136,52 @@ def _wire_safe(value: Any) -> Any:
     return value
 
 
+SUMMARY_FIELDS = ("tool", "outcome", "comparison_status", "count", "count_is_exact", "matches_seen_before_interruption",
+                  "matches_returned", "more_matches", "results_are_partial", "record_pairs_compared", "explanation",
+                  "next_cursor", "truncated", "next_offset", "next_start_after", "columns_truncated",
+                  "next_column_offset", "sample_complete", "sample_stop_reason", "listing_complete", "warnings", "error")
+
+
+def _summary(payload: dict[str, Any]) -> dict[str, Any]:
+    """The conclusion of a result, for the text block in summary mode: outcome, counts, partiality,
+    cursors, warnings, filters and errors - everything needed to judge what was established."""
+    out = {k: payload[k] for k in SUMMARY_FIELDS if k in payload}
+    if isinstance(payload.get("scan"), dict):
+        out["scan"] = {k: payload["scan"][k] for k in ("complete", "stop_reason") if k in payload["scan"]}
+    search = payload.get("search")
+    if isinstance(search, dict):
+        picked = {k: search[k] for k in ("filters", "filters_a", "filters_b", "compared_column_count",
+                                         "coverage_warning") if k in search}
+        if picked:
+            out["search"] = picked
+    out["detail"] = "Summary only. The structured content of this result holds the complete response."
+    return out
+
+
+def _without(payload: dict[str, Any], locations: list[tuple]) -> dict[str, Any]:
+    """A copy of payload with the fields at the given validation-error locations removed."""
+    payload = json.loads(json.dumps(payload, ensure_ascii=False))
+    for loc in locations:
+        node: Any = payload
+        for step in loc[:-1]:
+            try:
+                node = node[step]
+            except (KeyError, IndexError, TypeError):
+                node = None
+                break
+        if isinstance(node, dict):
+            node.pop(loc[-1], None)
+    return payload
+
+
+def _conforms(model: type[BaseModel], payload: dict[str, Any]) -> bool:
+    try:
+        model.model_validate(payload)
+        return True
+    except ValidationError:
+        return False
+
+
 def result_size(result: types.CallToolResult) -> int:
     """Bytes of the complete MCP result as serialised: both representations and the envelope."""
     return len(result.model_dump_json(by_alias=True, exclude_none=True).encode("utf-8"))
@@ -160,8 +206,9 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         return payload
 
     def build(payload: dict[str, Any], is_error: bool) -> types.CallToolResult:
-        """One payload, two representations: the structured content, and the same thing as JSON text."""
-        text = json.dumps(payload, ensure_ascii=False)
+        """One payload, two representations: the structured content, and the same thing as JSON text
+        (or, with text_content: summary, its conclusion fields only)."""
+        text = json.dumps(payload if config.text_content == "full" else _summary(payload), ensure_ascii=False)
         return types.CallToolResult(content=[types.TextContent(type="text", text=text)],
                                     structured_content=payload, is_error=is_error)
 
@@ -176,11 +223,22 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         try:
             model.model_validate(payload)
         except ValidationError as exc:
-            log.error("%s produced a response that does not match its output schema: %s", tool, exc)
-            is_error = True
-            payload = failed(tool, {"type": "internal_error",
-                                     "message": "The server built a response that does not match its published schema; "
-                                                "it was withheld. This is a server defect, not a finding about the data."})
+            problems = exc.errors()
+            if all(p["type"] == "extra_forbidden" for p in problems):
+                # A field the schema does not know about. Everything the schema promises is present and well
+                # typed, so the answer is sent without the unknown fields rather than withheld. The schema
+                # still forbids them, so a client that validates sees a conforming result.
+                log.error("%s produced field(s) missing from its output schema, which were dropped: %s",
+                          tool, [".".join(map(str, p["loc"])) for p in problems])
+                payload = _without(payload, [p["loc"] for p in problems])
+                problems = [] if _conforms(model, payload) else problems
+            if problems:
+                log.error("%s produced a response that does not match its output schema: %s", tool, exc)
+                is_error = True
+                payload = failed(tool, {"type": "internal_error",
+                                         "message": "The server built a response that does not match its published "
+                                                    "schema; it was withheld. This is a server defect, not a finding "
+                                                    "about the data."})
         result = build(payload, is_error)
         if result_size(result) > limits.max_output_bytes:
             # Responses are built to fit; this is the backstop that guarantees the bound. Whatever the
@@ -210,8 +268,13 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         return respond(tool, payload, failed)
 
     async def scan(ctx: Context, tool: str, request: dict[str, Any], max_scan_seconds: float | None,
-                   fn: Callable[[ScanControl], dict[str, Any]]) -> types.CallToolResult:
-        """Run a file scan in a worker thread with a slot limit, time limit, progress and cancellation."""
+                   fn: Callable[[ScanControl], dict[str, Any]], needs_slot: bool = True) -> types.CallToolResult:
+        """Run a file scan in a worker thread with a slot limit, time limit, progress and cancellation.
+
+        `needs_slot=False` is for reading a header only: that read is bounded by max_record_bytes and the
+        time limit, so it does not wait behind long scans for a slot. It still runs on the bounded worker
+        thread pool, under the time limit, with progress and cancellation.
+        """
         budget = limits.max_scan_seconds
         if max_scan_seconds is not None:
             if max_scan_seconds <= 0:
@@ -219,6 +282,8 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                 return respond(tool, payload, True)
             budget = min(budget, max_scan_seconds)
         control = ScanControl(max_seconds=budget)
+        if not needs_slot:
+            control.phase = "starting"
 
         async def report_progress() -> None:
             while True:
@@ -237,12 +302,18 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         outcome: list[tuple[dict[str, Any], bool]] = []
         done = anyio.Event()
 
+        async def work() -> None:
+            # Shielded: the slot (if any) is held until the worker thread has really finished, so the cap
+            # on concurrent scans holds even while a cancelled scan is winding down.
+            with anyio.CancelScope(shield=True):
+                outcome.append(await anyio.to_thread.run_sync(guarded, tool, request, partial(fn, control), limiter=threads))
+
         async def run_in_thread() -> None:
-            async with scan_slots:  # waiting here is cancellable and does not use up the time budget
-                # Shielded: the slot is held until the worker thread has really finished, so the cap
-                # on concurrent scans holds even while a cancelled scan is winding down.
-                with anyio.CancelScope(shield=True):
-                    outcome.append(await anyio.to_thread.run_sync(guarded, tool, request, partial(fn, control), limiter=threads))
+            if needs_slot:
+                async with scan_slots:  # waiting here is cancellable and does not use up the time budget
+                    await work()
+            else:
+                await work()
             done.set()
 
         async with anyio.create_task_group() as tg:
@@ -257,8 +328,8 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                 log.info("%s cancelled by client after %.1fs; stopping the scan", tool, control.elapsed)
                 raise
             tg.cancel_scope.cancel()
-        payload, failed = outcome[0]
-        return respond(tool, payload, failed)
+        payload, is_error = outcome[0]
+        return respond(tool, payload, is_error)
 
     # ---------------------------------------------------------------- process information
     # Every tool returns one validated payload, published under an explicit output schema.
@@ -279,6 +350,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
     async def list_folders(
         process: Annotated[str | None, Field(description="Process id or name. Omit for the folders of all processes.")] = None,
         folder: Annotated[str | None, Field(description="A folder from an earlier list_folders response. Lists its immediate subfolders instead of the mapped folders.")] = None,
+        start_after: Annotated[str | None, Field(description="Continue a truncated listing of subfolders from this next_start_after")] = None,
         offset: Annotated[int, Field(description="Continue a truncated listing from this next_offset")] = 0,
     ) -> Annotated[types.CallToolResult, models.ListFoldersResult]:
         """List the folders that can be read. Without `folder`: the folders described by the process maps - all
@@ -286,8 +358,9 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         it. With `folder`: the immediate subfolders of that folder (dated or archive directories, say), one
         level at a time; call again on a subfolder to go deeper. Only mapped folders and their genuine
         subfolders are reachable; links are never followed. Then call list_csv_files on a folder."""
-        return await quick("list_folders", {"process": process, "folder": folder, "offset": offset},
-                           lambda: service.list_folders(process, offset, folder))
+        return await quick("list_folders", {"process": process, "folder": folder, "start_after": start_after,
+                                            "offset": offset},
+                           lambda: service.list_folders(process, offset, folder, start_after))
 
     @server.tool(annotations=read_only)
     async def list_csv_files(
@@ -300,6 +373,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
             Field(description="Which date the date filters apply to: a filename token such as 'business_date' or "
                               "'run_timestamp' (default: the folder's main filename date), or 'filesystem_modified'"),
         ] = None,
+        start_after: Annotated[str | None, Field(description="Continue a truncated listing from this next_start_after (same filters and sort order)")] = None,
         offset: Annotated[int, Field(description="Continue a truncated listing from this next_offset")] = 0,
         newest_first: Annotated[bool, Field(description="Sort filenames descending (default) or ascending")] = True,
     ) -> Annotated[types.CallToolResult, models.ListCsvFilesResult]:
@@ -310,9 +384,9 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         files left out because their date could not be established are counted separately from files outside
         the date range."""
         request = {"folder": folder, "filename_contains": filename_contains, "date_from": date_from,
-                   "date_to": date_to, "date_field": date_field, "offset": offset}
+                   "date_to": date_to, "date_field": date_field, "start_after": start_after, "offset": offset}
         return await quick("list_csv_files", request, lambda: service.list_csv_files(
-            folder, filename_contains, date_from, date_to, date_field, offset, newest_first))
+            folder, filename_contains, date_from, date_to, date_field, offset, newest_first, start_after))
 
     # Reading a header or a sample can mean reading a lot of file (a huge first line, a long run of blank
     # lines), so these two run under the same supervision as the searches: slot, time limit, progress, cancel.
@@ -334,7 +408,8 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                    "sample_columns": sample_columns, "column_offset": column_offset}
         return await scan(ctx, "inspect_csv_headers", request, max_scan_seconds, lambda control:
                           service.inspect_csv_headers(folder, filename, sample_rows, column_offset,
-                                                      _plain(sample_columns), control=control))
+                                                      _plain(sample_columns), control=control),
+                          needs_slot=bool(sample_rows))
 
     @server.tool(annotations=read_only)
     async def search_column_names(
@@ -347,7 +422,8 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         hundreds of columns. Returns matching column names, their positions, and a selector for each that is
         safe to pass to the other tools."""
         return await scan(ctx, "search_column_names", {"folder": folder, "filename": filename, "term": term}, None,
-                          lambda control: service.search_column_names(folder, filename, term, control=control))
+                          lambda control: service.search_column_names(folder, filename, term, control=control),
+                          needs_slot=False)
 
     # ---------------------------------------------------------------- scans
 

@@ -4,8 +4,13 @@ The process maps name the approved roots. Everything else is reached from a root
 component at a time, and no component may be a link: not a symbolic link, not a Windows
 junction or other reparse point. A file is opened relative to the directory that was
 reached, never by re-resolving a path string, so swapping a directory for a link between
-the check and the open cannot redirect the read (where the platform supports it; see
-`HAVE_DIR_FD`). When confinement cannot be shown, access is refused.
+the check and the open cannot redirect the read.
+
+That guarantee needs directory-relative opens (`HAVE_DIR_FD`: Linux, macOS). Without them
+(Windows) a subfolder can only be checked before and after the open, which narrows the race
+but cannot close it, so subfolders are refused there unless the configuration explicitly
+accepts the weaker check (`allow_unconfined`). When confinement cannot be shown, access is
+refused.
 """
 
 from __future__ import annotations
@@ -33,9 +38,18 @@ def _is_link(st: os.stat_result) -> bool:
     return stat_module.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & _REPARSE_POINT)
 
 
+_WINDOWS_DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
 def _bad_component(name: str) -> bool:
-    return (not name or name in (os.curdir, os.pardir) or "\x00" in name or "/" in name
-            or (os.sep != "/" and os.sep in name) or bool(os.altsep and os.altsep in name))
+    if (not name or name in (os.curdir, os.pardir) or "\x00" in name or "/" in name
+            or (os.sep != "/" and os.sep in name) or bool(os.altsep and os.altsep in name)):
+        return True
+    if os.name == "nt":
+        # Windows silently drops trailing dots and spaces ('.. ' is '..') and maps device names anywhere.
+        return (name != name.rstrip(". ") or ":" in name
+                or name.split(".")[0].rstrip(" ").upper() in _WINDOWS_DEVICES)
+    return False
 
 
 class ConfinedDir:
@@ -45,7 +59,7 @@ class ConfinedDir:
     context manager; every operation is relative to the directory actually reached.
     """
 
-    def __init__(self, root: Path, parts: tuple[str, ...], shown: str):
+    def __init__(self, root: Path, parts: tuple[str, ...], shown: str, allow_unconfined: bool = False):
         self.root = str(root)
         self.parts = parts
         self.shown = shown  # how the folder is named in messages
@@ -56,6 +70,14 @@ class ConfinedDir:
                 raise AccessError("folder_not_found", f"'{shown}' is not a valid folder path.")
         if HAVE_DIR_FD:
             self._fd = self._descend()
+        elif parts and not allow_unconfined:
+            raise AccessError(
+                "subfolder_access_unavailable",
+                f"'{shown}' is a subfolder of an approved folder, and on this platform the server cannot open a "
+                "subfolder in a way that guarantees no link leads outside the approved folders. Subfolders are "
+                "therefore refused here. Files directly in the mapped folder can still be read; an administrator "
+                "can declare this subfolder in a process map, or accept the weaker check with "
+                "allow_unconfined_subfolders in the server configuration.")
         else:
             self._verify_chain()
 
@@ -75,7 +97,9 @@ class ConfinedDir:
     def _descend(self) -> int:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         try:
-            fd = os.open(self.root, flags)
+            # The root is trusted configuration and is opened as declared, even if its declared path
+            # passes through a link. Everything below it is opened without following any.
+            fd = os.open(self.root, flags & ~os.O_NOFOLLOW)
         except OSError as exc:
             raise self._folder_error(exc, None, None) from exc
         try:

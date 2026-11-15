@@ -6,7 +6,7 @@
 
 Every company, identifier and price is invented. The data contains things worth investigating: a vendor redelivery, a retried run, a backfill,
 securities dropped by filter rules, and a position that fails its join because a SEDOL lost
-its leading zero.
+its leading zero. Old custodian deliveries sit in dated archive subfolders.
 """
 
 from __future__ import annotations
@@ -123,6 +123,13 @@ def build(root: Path) -> None:
     security_master(root, "20261113", "20261113T211500", corrected + [LATE_ADDITION] + bulk, "20261113T204700")
     # A backfill of 2 Nov, run on 13 Nov.
     security_master(root, "20261102", "20261113T220000", STORY + bulk, "20261102T180200", backfill=True)
+    # Older custodian deliveries are moved into dated archive subfolders, which no process map declares.
+    raw = root / "positions" / "01_custodian_raw"
+    archive = raw / "archive" / "2026-11"
+    archive.mkdir(parents=True, exist_ok=True)
+    (raw / "archive" / "2026-10").mkdir(exist_ok=True)
+    source = (raw / "custodian_positions_20261112_20261112T200000.csv").read_text(encoding="utf-8")
+    (archive / "custodian_positions_20261101_20261101T200000.csv").write_text(source, encoding="utf-8")
 
 
 def main() -> None:

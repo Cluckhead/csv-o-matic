@@ -170,3 +170,63 @@ def test_no_response_exceeds_the_output_limit(ws, case, data):
             payload = {"error": {"type": failure.kind, "message": failure.message, **failure.details}}
         size = wire_bytes(payload)
         assert size <= limit, f"call {index}: {size} bytes exceeds the limit of {limit}"
+
+
+@settings(max_examples=250, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(table=tables(), identifier=st.sampled_from(IDENTIFIERS), data=st.data())
+def test_filtered_search_agrees_with_pandas(ws, table, identifier, data):
+    """Identifier AND every filter, in the same record, exact text - judged by pandas, not by this code."""
+    header, rows, quoting, terminator, chunk = table
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, quoting=quoting, lineterminator=terminator)
+    writer.writerow(header)
+    writer.writerows(rows)
+    payload = out.getvalue().encode("utf-8")
+    (ws.root / "d" / "f.csv").write_bytes(payload)
+    frame = pd.read_csv(io.BytesIO(payload), dtype=str, keep_default_na=False, na_filter=False,
+                        skip_blank_lines=False, engine="c")
+    assert len(frame) == len(rows)
+    column = data.draw(st.sampled_from(header))
+    filter_columns = data.draw(st.lists(st.sampled_from(header), unique=True, min_size=1, max_size=min(3, len(header))))
+    if rows and data.draw(st.booleans()):
+        # Aim at one real record: its identifier and its own filter values, so the filters can hold.
+        target = rows[data.draw(st.integers(0, len(rows) - 1))]
+        identifier = target[header.index(column)] or identifier
+        values = {c: target[header.index(c)] for c in filter_columns}
+        if data.draw(st.booleans()):  # ... or the same values on different records: they must not combine
+            other = rows[data.draw(st.integers(0, len(rows) - 1))]
+            values[filter_columns[-1]] = other[header.index(filter_columns[-1])]
+    else:
+        pool = [v for r in rows for v in r] or [""]
+        values = {c: data.draw(st.one_of(st.sampled_from(pool), cell)) for c in filter_columns}
+    filters = [{"column": c, "value": values[c]} for c in filter_columns]
+    svc = ws.service(chunk_bytes=chunk, max_record_bytes=max(chunk, 1 << 20), max_rows_per_response=5)
+
+    expected = [i for i in range(len(frame)) if frame[column].iloc[i] == identifier
+                and all(frame[f["column"]].iloc[i] == f["value"] for f in filters)]
+    hypothesis.event("filtered: some match" if expected else "filtered: no match")
+    hypothesis.event("filters: %d" % len(filters))
+    outside = sum(1 for i in range(len(frame)) if frame[column].iloc[i] == identifier) - len(expected)
+    counted = svc.count_matching_rows(ScanControl(), "d", "f.csv", identifier, column, filters=filters)
+    assert counted["count"] == len(expected) and counted["count_is_exact"]
+    if filters:
+        assert counted["outcome"] == ("match_found" if expected else "no_match_within_filters")
+        assert counted["identifier_matches_failing_filters"]["count"] == outside
+    got, cursor = [], None
+    while True:
+        page = svc.find_security_in_file(ScanControl(), "d", "f.csv", identifier, column, filters=filters, cursor=cursor)
+        got += page["matches"]
+        if page["more_matches"] == "none":
+            break
+        cursor = page["next_cursor"]
+    assert [m["values"] for m in got] == [dict(zip(header, frame.iloc[i])) for i in expected]
+    across = [i for i in range(len(frame)) if identifier in list(frame.iloc[i])
+              and all(frame[f["column"]].iloc[i] == f["value"] for f in filters)]
+    got, cursor = [], None
+    while True:
+        page = svc.search_across_columns(ScanControl(), "d", "f.csv", identifier, filters=filters, cursor=cursor)
+        got += page["matches"]
+        if page["more_matches"] == "none":
+            break
+        cursor = page["next_cursor"]
+    assert [m["values"] for m in got] == [dict(zip(header, frame.iloc[i])) for i in across]

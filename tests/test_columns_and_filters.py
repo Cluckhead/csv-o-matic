@@ -186,7 +186,7 @@ def test_duplicate_price_columns_are_mapped_explicitly_by_position(env, service)
     assert failure(lambda: compare(service, "dup_a.csv", "dup_b.csv", "K", compare_columns=[{"position": 2}])).kind == "ambiguous_column"
 
 
-def test_a_mapping_that_is_invalid_or_would_be_ignored_is_refused(env, service):
+def test_an_invalid_mapping_is_refused_and_an_unused_one_is_flagged(env, service):
     put(env, A, "one.csv", "ID,Price,Qty\nK,10,5\n")
     put(env, A, "two.csv", "ID,px,Qty\nK,99,5\n")
     assert failure(lambda: compare(service, "one.csv", "two.csv", "K", column_mapping={"Nope": "px"})).kind == "column_not_found"
@@ -196,8 +196,10 @@ def test_a_mapping_that_is_invalid_or_would_be_ignored_is_refused(env, service):
     twice = failure(lambda: compare(service, "one.csv", "two.csv", "K",
                                     column_mapping=[{"a": "Price", "b": "px"}, {"a": {"position": 2}, "b": "Qty"}]))
     assert twice.kind == "invalid_argument" and "more than once" in twice.message
-    unused = failure(lambda: compare(service, "one.csv", "two.csv", "K", compare_columns=["Qty"], column_mapping={"Price": "px"}))
-    assert unused.kind == "unused_column_mapping" and "Price" in unused.message and "nothing was compared" in unused.message
+    unused = compare(service, "one.csv", "two.csv", "K", compare_columns=["Qty"], column_mapping={"Price": "px"})
+    assert unused["comparison_status"] == "compared" and unused["search"]["compared_column_count"] == 1
+    assert unused["search"]["unused_column_mapping"]["file_a_columns"] == ["Price"]
+    assert "NOT compared" in unused["search"]["unused_column_mapping"]["note"]
     used = compare(service, "one.csv", "two.csv", "K", compare_columns=["Qty", "Price"], column_mapping={"Price": "px"})
     assert used["search"]["compared_column_count"] == 2 and used["comparisons"][0]["changed_count"] == 1
     as_key = compare(service, "one.csv", "two.csv", "K", compare_columns=["Qty"], match_keys=["Price"], column_mapping={"Price": "px"})

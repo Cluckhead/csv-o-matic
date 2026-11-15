@@ -42,11 +42,27 @@ class Limits:
             raise ConfigError("limits.max_record_bytes must be at least limits.chunk_bytes")
 
 
+TEXT_CONTENT_MODES = ("full", "summary")
+
+
 @dataclass(frozen=True)
 class Config:
     data_root: Path
     process_maps_dir: Path
     limits: Limits = field(default_factory=Limits)
+    # Where the platform cannot open a folder relative to its parent without following links (Windows),
+    # subfolders of approved roots are refused unless this is set: confinement there is checked, not
+    # guaranteed. See README "Folder access".
+    allow_unconfined_subfolders: bool = False
+    # "full": the text block repeats the whole structured result as JSON. "summary": the text block
+    # holds only the conclusion fields, for clients that pass both to the model.
+    text_content: str = "full"
+
+    def __post_init__(self) -> None:
+        if self.text_content not in TEXT_CONTENT_MODES:
+            raise ConfigError(f"text_content must be one of {list(TEXT_CONTENT_MODES)}, got {self.text_content!r}")
+        if not isinstance(self.allow_unconfined_subfolders, bool):
+            raise ConfigError("allow_unconfined_subfolders must be true or false")
 
 
 def load_config(path: str | os.PathLike[str] | None = None) -> Config:
@@ -62,7 +78,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError(f"{config_path}: top level must be a mapping")
 
-    unknown = set(raw) - {"data_root", "process_maps_dir", "limits"}
+    unknown = set(raw) - {"data_root", "process_maps_dir", "limits", "allow_unconfined_subfolders", "text_content"}
     if unknown:
         raise ConfigError(f"{config_path}: unknown keys {sorted(unknown)}")
     for key in ("data_root", "process_maps_dir"):
@@ -81,4 +97,6 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
         data_root=resolve(raw["data_root"]),
         process_maps_dir=resolve(raw["process_maps_dir"]),
         limits=Limits(**raw_limits),
+        allow_unconfined_subfolders=raw.get("allow_unconfined_subfolders", False),
+        text_content=raw.get("text_content", "full"),
     )

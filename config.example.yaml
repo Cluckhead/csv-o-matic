@@ -1,6 +1,8 @@
 # CSV-o-Matic configuration. Relative paths are resolved against this file's directory.
 data_root: ./sample_data          # base directory for relative folder paths in process maps
 process_maps_dir: ./process_maps  # maintained YAML/JSON process maps, re-read on every request
+# allow_unconfined_subfolders: false  # Windows only: read subfolders with a checked, not guaranteed, confinement
+# text_content: full                  # or "summary": the text block holds only the conclusion fields
 
 limits:                           # every key is optional; the values below are the defaults
   max_rows_per_response: 25       # matching rows returned by one call
