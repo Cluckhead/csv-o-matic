@@ -107,6 +107,9 @@ steps:
       - {from_folder: vendor_raw, from_column: ExchangeCode, to_folder: normalised, to_column: exchange_code}
       - {from_folder: vendor_raw, from_column: ClosePrice, to_folder: normalised, to_column: close_price, rule: "Rounded to 4 decimal places"}
       - {from_folder: vendor_raw, from_column: Ccy, to_folder: normalised, to_column: currency}
+      - {from_folder: vendor_raw, from_column: IsPrimary, to_folder: normalised, to_column: is_primary}
+      - {from_folder: vendor_raw, from_column: MaturityDate, to_folder: normalised, to_column: maturity_date}
+      - {from_folder: vendor_raw, from_column: Coupon, to_folder: normalised, to_column: coupon}
     transformation_rules:
       - "Reads only the latest run_timestamp of vendor_raw for the business date."
     filter_rules:
@@ -142,5 +145,5 @@ steps:
     transformation_rules:
       - "Where a security has several listings, only the row with is_primary = Y is kept."
     filter_rules:
-      - "asset_class OTHER is in neither branch, so such securities never reach the golden master."
+      - "Nothing is filtered here for asset class, but note: asset_class OTHER enters neither branch, so such securities are already missing from both enriched folders and never reach the golden master."
       - "Securities with no primary listing are dropped."

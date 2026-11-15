@@ -91,8 +91,8 @@ class CsvFormat(_Model):
     @field_validator("delimiter")
     @classmethod
     def _delimiter(cls, value: str) -> str:
-        if len(value) != 1 or value in '"\r\n' or ord(value) > 127:
-            raise ValueError("delimiter must be a single ASCII character other than a quote or newline")
+        if len(value) != 1 or value in '"\r\n' or ord(value) > 126 or (ord(value) < 32 and value != "\t"):
+            raise ValueError("delimiter must be a single printable ASCII character (or tab), not a quote or newline")
         return value
 
     @field_validator("encoding")
@@ -197,6 +197,20 @@ class FolderRef:
     @property
     def filename_convention(self) -> FilenameConvention | None:
         return next((f.filename_convention for _, f in self.usages if f.filename_convention), None)
+
+    def csv_format(self) -> tuple[CsvFormat, str | None]:
+        """The folder's CSV format, and a description of the conflict if the maps disagree.
+
+        A map that does not mention csv_format has no opinion; among those that do, all must agree.
+        """
+        stated = [(proc.id, f.csv_format) for proc, f in self.usages if "csv_format" in f.model_fields_set]
+        if not stated:
+            return self.primary.csv_format, None
+        distinct = {(fmt.delimiter, fmt.encoding) for _, fmt in stated}
+        if len(distinct) == 1:
+            return stated[0][1], None
+        detail = "; ".join(f"{pid}: delimiter {fmt.delimiter!r}, encoding {fmt.encoding}" for pid, fmt in stated)
+        return stated[0][1], detail
 
 
 @dataclass

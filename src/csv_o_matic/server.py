@@ -41,7 +41,11 @@ Reading results:
   Never treat inconclusive as absent.
 - A match does not mean every match was returned: check results_are_partial / more_matches and use
   next_cursor to fetch more.
-- Matching is exact text matching. '00123' and '123' are different identifiers.
+- Matching is exact, whole-value text matching. '00123' and '123' are different identifiers, and part of a
+  name does not match the full name. When nothing matches exactly, check near_misses: it reports values that
+  contain the search text, differ only by whitespace, or sit in a different column.
+- Any exact value can be searched for, not only security identifiers (a portfolio code, for example).
+- record_number is 1-based and counts the header as record 1.
 - filesystem_modified_time is when a file was written to disk; business dates and run timestamps come from
   the filename tokens.
 You choose the files and interpret the evidence; the server only reports what is in the files you select.
@@ -49,7 +53,7 @@ You choose the files and interpret the evidence; the server only reports what is
 
 Folder = Annotated[str, Field(description="Folder path exactly as returned by list_folders")]
 Filename = Annotated[str, Field(description="File name exactly as returned by list_csv_files (no path)")]
-Identifier = Annotated[str, Field(description="Identifier value to match exactly, as text. Leading zeroes are significant.")]
+Identifier = Annotated[str, Field(description="Value to match exactly against whole field values, as text. Leading zeroes are significant; partial values do not match.")]
 Columns = Annotated[
     list[str] | None,
     Field(description="Columns to return for each match. Omit for the complete row. Use '#<position>' for a repeated column name."),
@@ -67,12 +71,18 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
     service = service or Service(config)
     limits = config.limits
     scan_slots = anyio.CapacityLimiter(limits.max_concurrent_scans)
+    threads = anyio.CapacityLimiter(limits.max_concurrent_scans + 8)  # scan_slots is the real limit
     read_only = types.ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
     server = MCPServer("csv-o-matic", instructions=INSTRUCTIONS)
 
     def respond(tool: str, payload: dict[str, Any], is_error: bool = False) -> types.CallToolResult:
         text = json.dumps(payload, ensure_ascii=False)
-        if len(text.encode("utf-8")) > limits.max_output_bytes:
+        try:
+            size = len(text.encode("utf-8"))
+        except UnicodeEncodeError:  # e.g. a lone surrogate echoed from an argument
+            text = json.dumps(payload, ensure_ascii=True)
+            size = len(text)
+        if size > limits.max_output_bytes:
             # Responses are built to fit; this is the backstop that guarantees the bound.
             is_error = True
             text = json.dumps({
@@ -85,7 +95,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
 
     def guarded(tool: str, request: dict[str, Any], fn: Callable[[], dict[str, Any]]) -> tuple[dict[str, Any], bool]:
         """Run a tool body, turning failures into explicit, structured explanations."""
-        request = {k: v for k, v in request.items() if v is not None}
+        request = {k: _bounded(v) for k, v in request.items() if v is not None}
         try:
             return {"tool": tool, **fn()}, False
         except ToolFailure as failure:
@@ -130,21 +140,30 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                 except Exception:  # noqa: BLE001 - progress is best-effort
                     log.debug("progress notification failed", exc_info=True)
 
-        finished = False
-        try:
-            async with anyio.create_task_group() as tg:
-                tg.start_soon(report_progress)
-                payload, failed = await anyio.to_thread.run_sync(
-                    guarded, tool, request, partial(fn, control), limiter=scan_slots, abandon_on_cancel=True
-                )
-                finished = True
-                tg.cancel_scope.cancel()
-        finally:
-            if not finished:
-                # The client cancelled (or disconnected). Tell the worker thread to stop reading; it
-                # checks this flag between chunks. MCP sends no response to a cancelled request.
+        outcome: list[tuple[dict[str, Any], bool]] = []
+        done = anyio.Event()
+
+        async def run_in_thread() -> None:
+            async with scan_slots:  # waiting here is cancellable and does not use up the time budget
+                # Shielded: the slot is held until the worker thread has really finished, so the cap
+                # on concurrent scans holds even while a cancelled scan is winding down.
+                with anyio.CancelScope(shield=True):
+                    outcome.append(await anyio.to_thread.run_sync(guarded, tool, request, partial(fn, control), limiter=threads))
+            done.set()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(report_progress)  # also reports while the scan is queued for a slot
+            tg.start_soon(run_in_thread)
+            try:
+                await done.wait()
+            except BaseException:
+                # The client cancelled or disconnected. Tell the worker to stop; it checks this flag
+                # on every read. MCP sends no response to a cancelled request.
                 control.stop.set()
-                log.info("%s cancelled by client after %.1fs; scan stopped, no result delivered", tool, control.elapsed)
+                log.info("%s cancelled by client after %.1fs; stopping the scan", tool, control.elapsed)
+                raise
+            tg.cancel_scope.cancel()
+        payload, failed = outcome[0]
         return respond(tool, payload, failed)
 
     # ---------------------------------------------------------------- process information
@@ -312,6 +331,22 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                                                            identifier_b, compare_columns, column_mapping, match_keys))
 
     return server
+
+
+def _bounded(value: Any) -> Any:
+    """Keep the echo of a request small: long strings are cut, long collections summarised."""
+    if isinstance(value, str):
+        return value if len(value) <= 200 else f"{value[:200]}...[{len(value)} characters]"
+    if isinstance(value, list):
+        head = [_bounded(v) for v in value[:5]]
+        return head if len(value) <= 5 else head + [f"...and {len(value) - 5} more"]
+    if isinstance(value, dict):
+        items = list(value.items())
+        head = {_bounded(k): _bounded(v) for k, v in items[:5]}
+        if len(items) > 5:
+            head["..."] = f"and {len(items) - 5} more"
+        return head
+    return value
 
 
 def _raise(exc: Exception) -> Callable[[], dict[str, Any]]:

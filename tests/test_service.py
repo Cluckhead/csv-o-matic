@@ -44,9 +44,13 @@ def test_unknown_process_and_broken_map_are_reported(env, service):
 
 
 def test_oversized_map_degrades_to_overview(env):
-    small = make_service(env, max_output_bytes=4000)
+    path = env[1] / "demo.yaml"
+    path.write_text(path.read_text().replace(
+        'filter_rules: ["Drops rows with Qty = 0."]',
+        "filter_rules:\n" + "".join(f'      - "Rule {i}: drops rows where some long condition number {i} holds."\n' for i in range(150))))
+    small = make_service(env, max_output_bytes=8000)
     out = small.get_process_map("demo")
-    assert out["truncated"] and len(dumps(out)) < 4000
+    assert out["truncated"] and len(dumps(out)) < 8000
     assert [s["id"] for s in out["process"]["steps"]] == ["first", "second", "third"]
     step = small.get_process_map("demo", step_id="second")
     assert step["step"]["filter_rules"] and {f["id"] for f in step["folders"]} == {"stage_a", "stage_b"}
@@ -56,7 +60,8 @@ def test_list_folders(service):
     out = service.list_folders()
     assert [f["folder"] for f in out["folders"]] == ["stage/a", "stage/b", "stage/semi"]
     a = out["folders"][0]
-    assert a["exists_on_disk"] and a["description"] == "First stage output."
+    assert a["exists_on_disk"] and a["description"] == "First stage output." and "description" not in a["used_by"][0]
+    assert a["identifier_columns"] == [{"column": "ID", "identifier_type": "internal"}]
     roles = {(s["step_id"], s["role"]) for s in a["used_by"][0]["steps"]}
     assert roles == {("first", "writes"), ("second", "reads"), ("third", "reads")}
     assert service.list_folders("demo")["total_folders"] == 3
@@ -69,7 +74,7 @@ def test_list_csv_files_separates_filename_dates_from_mtime(env, service):
     os.utime(old, (1_600_000_000, 1_600_000_000))  # written to disk in 2020, business date 2026
     out = service.list_csv_files(A)
     names = [f["filename"] for f in out["files"]]
-    assert "readme.txt" not in names and out["non_csv_entries_ignored"] == 1
+    assert "readme.txt" not in names and out["other_entries_ignored"] == 1
     item = next(f for f in out["files"] if f["filename"] == TRICKY)
     assert item["filename_tokens"] == {"business_date": "2026-11-12", "run_timestamp": "2026-11-12T18:00:00"}
     assert item["filesystem_modified_time"].startswith("2020-09-13")
@@ -139,13 +144,20 @@ def test_wide_headers(env, service):
     assert found["matching_column_count"] == 11
     assert found["matching_columns"][0] == {"column": "px_field_050", "position": 51}
     assert service.search_column_names(A, "wide.csv", "zzz")["matching_columns"] == []
-    small = make_service(env, max_output_bytes=4000)
-    page = small.inspect_csv_headers(A, "wide.csv")
-    assert page["columns_truncated"] and len(dumps(page)) < 4000
-    rest = small.inspect_csv_headers(A, "wide.csv", column_offset=page["next_column_offset"])
-    assert rest["columns"][0] == f"col_{page['next_column_offset']:03d}"
+    with open(env[0] / A / "wider.csv", "w") as fh:
+        fh.write(",".join(f"column_{i:04d}" for i in range(2000)) + "\n")
+    small = make_service(env, max_output_bytes=8000)
+    page = small.inspect_csv_headers(A, "wider.csv")
+    assert page["columns_truncated"] and len(dumps(page)) < 8000
+    seen, offset = list(page["columns"]), page["next_column_offset"]
+    while offset is not None:
+        rest = small.inspect_csv_headers(A, "wider.csv", column_offset=offset)
+        assert rest["columns"][0] == f"column_{offset:04d}"
+        seen += rest["columns"]
+        offset = rest.get("next_column_offset")
+    assert seen == [f"column_{i:04d}" for i in range(2000)]
     sample = small.inspect_csv_headers(A, "wide.csv", sample_rows=1)
-    assert sample["sample_truncated"] and len(dumps(sample)) < 4000
+    assert sample["sample_truncated"] and len(dumps(sample)) < 8000
 
 
 def test_duplicate_column_names(env, service):
@@ -168,7 +180,11 @@ def test_find_exact_with_leading_zeroes_quotes_and_duplicates(service, ctl):
     assert [m["record_number"] for m in out["matches"]] == [2, 4]
     assert out["matches"][0]["values"] == {"ID": "00123", "Name": "Acme, Inc.", "Notes": "line1\nline2", "AltID": "X1", "Qty": "10"}
     assert out["matches"][1]["values"]["Name"] == 'Say "hi"'
-    assert "surrounding whitespace" in out["warnings"][0]  # ' 00123 ' is reported, not matched
+    # ' 00123 ' is reported as a near miss, never as a match; so is the value sitting in another column.
+    near = out["near_misses"]
+    assert near["same_value_with_surrounding_whitespace"] == {
+        "count": 1, "examples": [{"record_number": 5, "column": "ID", "value": " 00123 "}]}
+    assert near["exact_value_in_other_columns"] == {"AltID": 1} and "NOT exact matches" in near["note"]
 
     stripped = service.find_security_in_file(ctl(), A, TRICKY, "123", "ID")
     assert [m["values"]["Name"] for m in stripped["matches"]] == ["Beta Corp"]
@@ -231,11 +247,11 @@ def test_server_row_limit_caps_the_request(env, ctl):
 
 
 def test_output_size_truncation(env, ctl):
-    small = make_service(env, max_output_bytes=6000)
+    small = make_service(env, max_output_bytes=8000, max_rows_per_response=500)
     seen, cursor = [], None
     while True:
         out = small.find_security_in_file(ctl(), A, "many.csv", "DUP", "ID", cursor=cursor)
-        assert len(dumps(out)) <= 6000
+        assert len(dumps(out)) <= 8000
         seen += [m["values"]["Seq"] for m in out["matches"]]
         if out["more_matches"] == "none":
             break
@@ -245,7 +261,7 @@ def test_output_size_truncation(env, ctl):
     # A single row wider than the whole budget is still returned, visibly cut down.
     wide = small.find_security_in_file(ctl(), A, "wide.csv", "W0003", "ID")
     row = wide["matches"][0]
-    assert len(dumps(wide)) <= 6000 and row["values_omitted_for_size"] > 0 and row["values"]["ID"] == "W0003"
+    assert len(dumps(wide)) <= 8000 and row["values_omitted_for_size"] > 0 and row["values"]["ID"] == "W0003"
     assert small.find_security_in_file(ctl(), A, "wide.csv", "W0003", "ID", columns=["col_598"])["matches"][0]["values"] == {"col_598": "v3_598"}
 
 
@@ -272,7 +288,8 @@ def test_cursor_is_bound_to_its_search_and_file(env, service, ctl):
     assert info.value.kind == "invalid_cursor"
 
 
-def test_time_limit_gives_inconclusive_then_resumable(service):
+def test_time_limit_gives_inconclusive_then_resumable(env):
+    service = make_service(env, chunk_bytes=512, max_record_bytes=4096)
     out = service.find_security_in_file(ScanControl(max_seconds=0.0), A, "many.csv", "NOPE", "ID")
     assert out["outcome"] == "inconclusive" and out["scan"]["stop_reason"] == "time_limit" and not out["scan"]["complete"]
     assert "INCONCLUSIVE" in out["explanation"] and out["more_matches"] == "unknown"
@@ -314,8 +331,9 @@ def test_cancelled_scan_reports_partial_results(env):
     assert nothing["outcome"] == "confirmed_absent"
     control = ScanControl()
     control.stop.set()
-    cancelled = small.find_security_in_file(control, A, "many.csv", "NOPE", "ID")
-    assert cancelled["outcome"] == "inconclusive" and cancelled["scan"]["stop_reason"] == "cancelled"
+    with pytest.raises(ToolFailure) as info:  # cancelled before anything was read: no evidence at all
+        small.find_security_in_file(control, A, "many.csv", "NOPE", "ID")
+    assert info.value.kind == "cancelled"
 
 
 def test_parse_failure_is_explained_not_reported_as_absent(env, ctl):
@@ -411,8 +429,11 @@ def test_compare_ambiguous_then_resolved_with_keys(service, ctl):
     assert still["comparison_status"] == "ambiguous_alignment" and still["ambiguous_keys"]
 
 
-def test_compare_interrupted_and_bad_columns(service):
-    out = service.compare_security_records(ScanControl(max_seconds=0.0), B, "left.csv", B, "right.csv", "00123", "ID", "sec_id")
+def test_compare_interrupted_and_bad_columns(env, service):
+    with open(env[0] / B / "left.csv", "a") as fh:
+        fh.write("".join(f"9{i:04d},P1,1,Filler,1\n" for i in range(500)))
+    tiny = make_service(env, chunk_bytes=512, max_record_bytes=4096)
+    out = tiny.compare_security_records(ScanControl(max_seconds=0.0), B, "left.csv", B, "right.csv", "00123", "ID", "sec_id")
     assert out["comparison_status"] == "inconclusive" and out["presence"]["file_b"]["stop_reason"] == "not_scanned"
     with pytest.raises(ToolFailure) as info:
         service.compare_security_records(ScanControl(), B, "left.csv", B, "right.csv", "00123", "ID")
@@ -444,3 +465,28 @@ def test_source_files_are_never_modified(env, service, ctl):
     service.compare_security_records(ctl(), B, "left.csv", B, "right.csv", "00777", "ID", "sec_id")
     assert digest(env[0]) == before
     assert sorted(p.name for p in env[0].rglob("*") if p.is_file()) == sorted(os.path.basename(k) for k in before)
+
+
+def test_near_misses_explain_an_absence(env, service, ctl):
+    """A lost leading zero, a partial name and a wrong column all come back as hints, not as matches."""
+    (env[0] / A / "master.csv").write_text(
+        "sedol,name,alt\n0263494,BAE Systems PLC,X\n2073390,Berkshire,0263494\n1111111,Other,263494\n")
+    lost_zero = service.find_security_in_file(ctl(), A, "master.csv", "263494", "sedol")
+    assert lost_zero["outcome"] == "confirmed_absent" and lost_zero["matches"] == []
+    assert lost_zero["near_misses"]["identifier_inside_a_longer_value"] == {
+        "count": 1, "examples": [{"record_number": 2, "column": "sedol", "value": "0263494"}]}
+    assert lost_zero["near_misses"]["exact_value_in_other_columns"] == {"alt": 1}
+    assert "see near_misses" in lost_zero["explanation"]
+
+    partial = service.search_across_columns(ctl(), A, "master.csv", "BAE Systems")
+    assert partial["outcome"] == "confirmed_absent"
+    assert partial["near_misses"]["identifier_inside_a_longer_value"]["examples"][0]["value"] == "BAE Systems PLC"
+
+    count = service.count_matching_rows(ctl(), A, "master.csv", "0263494", "name")
+    assert count["count"] == 0 and count["near_misses"]["exact_value_in_other_columns"] == {"sedol": 1, "alt": 1}
+
+    clean = service.find_security_in_file(ctl(), A, "master.csv", "9999999", "sedol")
+    assert clean["outcome"] == "confirmed_absent" and "near_misses" not in clean
+    compared = service.compare_security_records(ctl(), A, "master.csv", A, "master.csv", "263494", "sedol")
+    assert compared["comparison_status"] == "absent_from_both"
+    assert "inside a longer value" in compared["presence"]["file_a"]["near_misses"]

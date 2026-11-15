@@ -12,8 +12,10 @@ a multi-gigabyte file. Most of a file can be skipped without parsing it:
    unusual quoting - is handed to Python's `csv` module, which decides where the record
    ends and what its fields are.
 
-So record boundaries and field values always follow the `csv` module's rules
-(RFC 4180 style: double-quote quoting, doubled quotes as escapes, LF or CRLF line ends).
+So record boundaries and field values always follow the `csv` module's rules as applied
+to a file opened with `newline=""` (RFC 4180 style: double-quote quoting, doubled quotes
+as escapes; a record ends at LF, CRLF or a bare CR outside quotes). The skipping above
+is only used on chunks without bare CRs; a chunk that has one is parsed in full.
 
 Only records that might contain the needle are yielded; the caller does the exact
 field comparison. With `needle=None` every record is yielded.
@@ -29,6 +31,10 @@ from dataclasses import dataclass, field
 from typing import BinaryIO, Iterator
 
 UTF8_BOM = b"\xef\xbb\xbf"
+
+# The csv module's field limit is process-wide. Record length is enforced here instead, per scan
+# (max_record_bytes), so lift the module's limit out of the way once rather than juggle it.
+csv.field_size_limit(2**31 - 1)
 
 
 class CsvParseError(Exception):
@@ -66,6 +72,10 @@ class ScanControl:
     resume_offset: int = 0
     resume_record: int = 0
     unterminated_quote_at_eof: bool = False
+    undecodable_lines: int = 0  # parsed lines holding bytes that are not valid in the file's encoding
+    # The search value encoded in encodings other than the declared one, and which of them were seen.
+    alt_needles: dict[str, bytes] = field(default_factory=dict)
+    alt_hits: set[str] = field(default_factory=set)
 
     def begin(self) -> None:
         if self.started is None:
@@ -100,47 +110,81 @@ def prefilter_needle(value: str, encoding: str) -> bytes | None:
 
 
 def _is_single_line_record(line: bytes, delimiter: bytes) -> bool:
-    """True when `line` is certain to be one complete record under the csv module's rules.
+    """True when `line` is certain to be one complete, cleanly quoted record.
 
-    The csv module opens a quoted field only when a quote is the first character of a field.
-    Pair the line's quotes off in order: if every opening quote sits at the start of the
-    line, straight after a delimiter, or straight after the previous closing quote (an
-    escaped quote), the csv module reads the quotes the same way and cannot be inside a
-    quoted field at the end of the line, so the record ends there. A False result does not
-    mean the line is bad, only that the csv module has to decide.
+    Pair the line's quotes off in order. The line passes when every opening quote sits at
+    the start of a field and every closing quote at the end of one (or is half of a doubled,
+    escaped quote). Then the csv module reads the quotes the same way, the record ends at
+    the end of the line, and every field's text appears in the line as written - which is
+    what makes it safe to skip a line that does not contain the search text. A False result
+    does not mean the line is bad, only that the csv module has to parse it.
     """
     parts = line.split(b'"')
+    if len(parts) == 1:
+        return True
     if not len(parts) & 1:  # odd number of quotes: a quoted field is still open
         return False
-    # parts[0], parts[2], ... are the stretches that precede each opening quote.
-    for before in set(parts[0:-1:2]):
-        if before and not before.endswith(delimiter):
+    # parts[0], parts[2], ... lie outside quotes: before the first quote, between a closing
+    # quote and the next opening one, and after the last quote.
+    first, last = parts[0], parts[-1]
+    if first and not first.endswith(delimiter):
+        return False
+    if last and last != b"\r" and not last.startswith(delimiter):
+        return False
+    for between in set(parts[2:-1:2]):
+        if between and not (between.startswith(delimiter) and between.endswith(delimiter)):
             return False
     return True
 
 
-class _BodyFeeder:
-    """Feeds physical lines to csv.reader and records how far it read."""
+BARE_CR = re.compile(rb"\r(?!\n)")
 
-    def __init__(self, body: bytes, pos: int, encoding: str):
+
+class _Lines:
+    """Finds physical line ends in one chunk, for feeding csv.reader a record at a time.
+
+    With `universal` set, LF, CRLF and bare CR all end a line (what a text file opened with
+    newline="" yields); otherwise only LF does, which is the same thing for a chunk known
+    to hold no bare CR. Search positions are cached so a chunk is scanned once, not once
+    per line.
+    """
+
+    def __init__(self, body: bytes, encoding: str, universal: bool, control: ScanControl):
         self._body = body
         self._encoding = encoding
-        self.pos = pos
+        self._universal = universal
+        self._control = control
+        self._lf = self._cr = -2  # next LF / CR at or after the last position asked about
+        self.pos = 0
         self.overrun = False  # csv.reader wanted a line beyond those available
 
-    def __iter__(self) -> "_BodyFeeder":
+    def start(self, pos: int) -> "_Lines":
+        self.pos = pos
+        self.overrun = False
+        return self
+
+    def __iter__(self) -> "_Lines":
         return self
 
     def __next__(self) -> str:
-        body = self._body
-        if self.pos >= len(body):
+        body, pos = self._body, self.pos
+        if pos >= len(body):
             self.overrun = True
             raise StopIteration
-        eol = body.find(b"\n", self.pos)
-        end = len(body) if eol < 0 else eol + 1
-        line = body[self.pos: end]
+        if self._lf != -1 and self._lf < pos:
+            self._lf = body.find(b"\n", pos)
+        end = len(body) if self._lf == -1 else self._lf + 1
+        if self._universal:
+            if self._cr != -1 and self._cr < pos:
+                self._cr = body.find(b"\r", pos)
+            if self._cr != -1 and self._cr + 1 < end and body[self._cr + 1] != 0x0A:
+                end = self._cr + 1  # a bare CR ends the line first
         self.pos = end
-        return line.decode(self._encoding, errors="replace")
+        try:
+            return body[pos:end].decode(self._encoding)
+        except UnicodeDecodeError:
+            self._control.undecodable_lines += 1
+            return body[pos:end].decode(self._encoding, errors="replace")
 
 
 def iter_records(
@@ -153,7 +197,7 @@ def iter_records(
     start_record: int = 0,
     control: ScanControl | None = None,
     chunk_bytes: int = 4 * 1024 * 1024,
-    max_record_bytes: int = 16 * 1024 * 1024,
+    max_record_bytes: int = 4 * 1024 * 1024,
 ) -> Iterator[Record]:
     """Yield records from `fh`, starting at a record boundary `start_offset`.
 
@@ -165,7 +209,6 @@ def iter_records(
     control.begin()
     codec = "utf-8" if encoding == "utf-8-sig" else encoding
     delim = delimiter.encode("ascii")
-    csv.field_size_limit(max(csv.field_size_limit(), max_record_bytes))
 
     fh.seek(start_offset)
     offset = start_offset  # file offset of the first byte not yet turned into a record
@@ -176,6 +219,8 @@ def iter_records(
             fh.seek(0)
     rec_no = start_record
     carry = b""
+    first_read = True
+    read_size = chunk_bytes
 
     def too_long() -> CsvParseError:
         return CsvParseError(
@@ -188,20 +233,25 @@ def iter_records(
 
     while True:
         control.bytes_done = offset
+        chunk = fh.read(read_size)
+        read_size = chunk_bytes
+        eof = not chunk
+        if eof and not carry:
+            break  # everything has been read: the scan is complete whatever the clock says
         reason = control.interruption()
-        if reason:
+        # The time limit is not applied to the first read, so every call makes progress and a
+        # chain of cursors always terminates. Cancellation is honoured at once.
+        if reason == "cancelled" or (reason and not first_read):
             control.stop_reason, control.resume_offset, control.resume_record = reason, offset, rec_no
             return
-
-        chunk = fh.read(chunk_bytes)
-        eof = not chunk
+        first_read = False
         buf = carry + chunk if carry else chunk
         if eof:
             body, carry = buf, b""
-            if not body:
-                break
         else:
-            cut = buf.rfind(b"\n")
+            # Cut at the last line end. A CR in the final byte is left for the next read,
+            # because it may be the first half of a CRLF.
+            cut = max(buf.rfind(b"\n"), buf.rfind(b"\r", 0, len(buf) - 1))
             if cut < 0:
                 if len(buf) > max_record_bytes:
                     raise too_long()
@@ -209,14 +259,35 @@ def iter_records(
                 continue
             body, carry = buf[: cut + 1], buf[cut + 1:]
 
+        # The search value's bytes under another encoding only mean something if the chunk itself
+        # reads as that encoding: a cp1252 byte also occurs inside valid UTF-8 sequences.
+        looks_utf8: bool | None = None
+        for name, alt in control.alt_needles.items():
+            if name in control.alt_hits or alt not in body:
+                continue
+            if name == "utf-8" or codec == "utf-8":
+                if looks_utf8 is None:
+                    try:
+                        body.decode("utf-8")
+                        looks_utf8 = True
+                    except UnicodeDecodeError:
+                        looks_utf8 = False
+                if (name == "utf-8") != looks_utf8:
+                    continue
+            control.alt_hits.add(name)
+
         n = len(body)
         pos = 0
+        # A bare CR ends a record, which the skipping below does not allow for: parse the lot.
+        skipping = needle is not None and not (b"\r" in body and BARE_CR.search(body))
+        lines = _Lines(body, codec, universal=not skipping and b"\r" in body, control=control)
         # Positions of the next needle occurrence and the next quote at or after `pos`:
         # -2 means not looked for yet, -1 means none left in this chunk.
         hit = quote = -2
         pushed_back = False
+        parsed = 0
         while pos < n:
-            if needle is not None:
+            if skipping:
                 if hit != -1 and hit < pos:
                     hit = body.find(needle, pos)
                 if quote != -1 and quote < pos:
@@ -239,34 +310,38 @@ def iter_records(
                     pos = eol + 1
                     continue
             # Tier 3: this record has to be parsed.
-            eol = body.find(b"\n", pos)
-            line = body[pos: n if eol < 0 else eol]
-            if b'"' not in line:
-                size = len(line) + (0 if eol < 0 else 1)
-                if line.endswith(b"\r"):
-                    line = line[:-1]
-                fields = line.decode(codec, errors="replace").split(delimiter) if line else []
-            else:
-                feeder = _BodyFeeder(body, pos, codec)
-                try:
-                    fields = next(csv.reader(feeder, delimiter=delimiter), [])
-                except csv.Error as exc:
-                    raise CsvParseError(
-                        f"CSV parsing failed at record {rec_no + 1} (byte {offset + pos}): {exc}",
-                        record_number=rec_no + 1,
-                        byte_offset=offset + pos,
-                    ) from exc
-                if feeder.overrun:
-                    if not eof:
-                        # The record continues in the next chunk: re-read it with more data.
-                        offset += pos
-                        carry = body[pos:] + carry
-                        if len(carry) > max_record_bytes:
-                            raise too_long()
-                        pushed_back = True
-                        break
-                    control.unterminated_quote_at_eof = True
-                size = feeder.pos - pos
+            parsed += 1
+            if not parsed & 0x3FF:  # a chunk full of candidates takes a while: stay responsive
+                reason = control.interruption()
+                if reason:
+                    control.bytes_done = offset + pos
+                    control.stop_reason, control.resume_offset, control.resume_record = reason, offset + pos, rec_no
+                    return
+            try:
+                fields = next(csv.reader(lines.start(pos), delimiter=delimiter), [])
+            except csv.Error as exc:
+                raise CsvParseError(
+                    f"CSV parsing failed at record {rec_no + 1} (byte {offset + pos}): {exc}",
+                    record_number=rec_no + 1,
+                    byte_offset=offset + pos,
+                ) from exc
+            if lines.overrun:
+                if not eof:
+                    # The record continues in the next chunk: re-read it with more data.
+                    # Read at least as much again as the record already holds, so a long
+                    # record is re-parsed a logarithmic number of times, not once per chunk.
+                    offset += pos
+                    carry = body[pos:] + carry
+                    if len(carry) > max_record_bytes:
+                        raise too_long()
+                    read_size = max(chunk_bytes, len(carry))
+                    pushed_back = True
+                    break
+                control.unterminated_quote_at_eof = True
+            size = lines.pos - pos
+            if size > max_record_bytes:
+                offset += pos
+                raise too_long()
             rec_no += 1
             yield Record(rec_no, offset + pos, offset + pos + size, fields)
             pos += size

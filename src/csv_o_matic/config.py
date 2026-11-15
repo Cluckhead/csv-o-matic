@@ -29,15 +29,15 @@ class Limits:
     progress_interval_seconds: float = 2.0
     # Memory bounds
     chunk_bytes: int = 4 * 1024 * 1024
-    max_record_bytes: int = 16 * 1024 * 1024
+    max_record_bytes: int = 4 * 1024 * 1024
 
     def __post_init__(self) -> None:
         for f in fields(self):
             value = getattr(self, f.name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
                 raise ConfigError(f"limits.{f.name} must be a positive number, got {value!r}")
-        if self.max_output_bytes < 4_000:
-            raise ConfigError("limits.max_output_bytes must be at least 4000")
+        if self.max_output_bytes < 8_000:
+            raise ConfigError("limits.max_output_bytes must be at least 8000")
         if self.max_record_bytes < self.chunk_bytes:
             raise ConfigError("limits.max_record_bytes must be at least limits.chunk_bytes")
 

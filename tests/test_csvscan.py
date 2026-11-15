@@ -45,6 +45,12 @@ CASES = {
     "only_header": b"a,b,c\n",
     "empty": b"",
     "many_newlines_in_quotes": b'a\n"\n\n\n\n"\nb\n',
+    "cr_only": b"a,b\r1,2\r3,4\r",
+    "cr_only_no_final": b"a,b\r1,2\r3,4",
+    "stray_cr_in_lf_file": b"a,b\n1,2\r3,4\n5,6\n",
+    "cr_inside_quotes": b'a,b\n"x\ry",2\n3,4\n',
+    "cr_then_blank": b"a\r\r\nb\n\rc",
+    "ends_with_cr": b"a,b\n1,2\r",
 }
 
 
@@ -64,7 +70,7 @@ def test_matches_csv_module(name, chunk):
 
 
 def nasty_cell(rng: random.Random) -> str:
-    alphabet = ['a', 'B', '0', '1', ' ', ',', '"', '\n', '\r\n', ';', 'é', "'", '00123', 'KEY']
+    alphabet = ['a', 'B', '0', '1', ' ', ',', '"', '\n', '\r\n', '\r', ';', 'é', "'", '00123', 'KEY']
     return "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 6)))
 
 
@@ -133,9 +139,28 @@ def test_cancel_and_time_limit_report_a_resumable_position():
     rest, _ = scan(data, 64, start_offset=control.resume_offset, start_record=control.resume_record)
     assert [(r.number, r.fields) for r in seen + rest] == [(r.number, r.fields) for r in full]
 
+    # An expired time limit still lets the first read through, so every call makes progress ...
     control = ScanControl(max_seconds=0.0)
+    first = list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control))
+    assert control.stop_reason == "time_limit" and 0 < len(first) < 20 and control.resume_offset > 0
+    rest, _ = scan(data, 64, start_offset=control.resume_offset, start_record=control.resume_record)
+    assert [(r.number, r.fields) for r in first + rest] == [(r.number, r.fields) for r in full]
+    # ... and a chain of such calls always reaches the end of the file.
+    offset, record, hops = 0, 0, 0
+    while True:
+        control = ScanControl(max_seconds=0.0)
+        list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control, start_offset=offset, start_record=record))
+        hops += 1
+        if control.stop_reason == "end_of_file":
+            break
+        assert control.resume_offset > offset
+        offset, record = control.resume_offset, control.resume_record
+    assert control.resume_record == len(full) and hops > 100
+    # Cancellation, unlike the time limit, stops before anything is read.
+    control = ScanControl()
+    control.stop.set()
     assert list(iter_records(io.BytesIO(data), chunk_bytes=64, control=control)) == []
-    assert control.stop_reason == "time_limit"
+    assert control.stop_reason == "cancelled" and control.resume_offset == 0
 
 
 def test_other_delimiter_and_encoding():
@@ -146,11 +171,11 @@ def test_other_delimiter_and_encoding():
     assert [r.fields[0] for r in found] == ["Ä1"]
 
 
-@pytest.mark.parametrize("seed", range(300))
+@pytest.mark.parametrize("seed", range(600))
 def test_malformed_quoting_still_agrees_with_csv_module(seed):
     """Raw text with stray, unbalanced and misplaced quotes: skipping must never change the answer."""
     rng = random.Random(1000 + seed)
-    alphabet = ['"', '"', ",", ",", "\n", "\n", "a", "b", "KEY", '""', '",', ',"', "\r\n", " "]
+    alphabet = ['"', '"', ",", ",", "\n", "\n", "a", "b", "KEY", '""', '",', ',"', "\r\n", "\r", " "]
     data = ("h1,h2\n" + "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 120)))).encode()
     if rng.random() < 0.5:
         data += b"\n"
@@ -161,3 +186,144 @@ def test_malformed_quoting_still_agrees_with_csv_module(seed):
         found, _ = scan(data, chunk, needle=b"KEY")
         got = {r.number: r.fields for r in found if "KEY" in r.fields}
         assert got == {i + 1: row for i, row in enumerate(expected) if "KEY" in row}
+
+
+@pytest.mark.parametrize("name", CASES)
+@pytest.mark.parametrize("chunk", [1, 3, 16, 4096])
+def test_skipping_counts_every_record(name, chunk):
+    """With a needle most records are skipped unparsed; the final record count must still be exact."""
+    data = CASES[name]
+    total = len(reference(data))
+    for needle in (b"zzz-not-there", b"1", b"x"):
+        _, control = scan(data, chunk, needle=needle)
+        assert control.stop_reason == "end_of_file" and control.resume_record == total
+        assert control.resume_offset == len(data) and control.bytes_done == len(data)
+
+
+def test_parse_errors_say_where():
+    data = b"a,b\n1,2\n3,4\n" + b'5,"never closed\n' + b"x,y\n" * 2000
+    with pytest.raises(CsvParseError) as info:
+        scan(data, 256, max_record_bytes=1024)
+    assert (info.value.record_number, info.value.byte_offset) == (4, 12)
+    assert "Record 4 starting at byte 12" in str(info.value)
+    with pytest.raises(CsvParseError) as info:  # the same, found while skipping
+        scan(data, 256, max_record_bytes=1024, needle=b"zzz")
+    assert (info.value.record_number, info.value.byte_offset) == (4, 12)
+
+
+def test_long_cr_only_file_is_read_in_chunks():
+    """No LF anywhere: the reader must still cut at CRs, not buffer the whole file as one record."""
+    rows = [[str(i), "x" * 20] for i in range(2000)]
+    data = b"id,v\r" + b"".join(b"%s,%s\r" % (a.encode(), b.encode()) for a, b in rows)
+    for needle in (None, b"1999"):
+        records, control = scan(data, 64, needle=needle, max_record_bytes=256)
+        assert control.resume_record == 2001
+        assert [r.fields for r in records if r.fields[0] == "1999"] == [["1999", "x" * 20]]
+
+
+def test_long_record_is_not_reparsed_once_per_chunk():
+    """A 2 MB quoted field read in 1 KB chunks must cost a handful of parses, not thousands."""
+    data = b'a,b\n1,"' + b"line\n" * 400_000 + b'"\n2,3\n'
+    import time
+    started = time.monotonic()
+    records, _ = scan(data, 1024, max_record_bytes=4 * 1024 * 1024)
+    assert [r.fields[0] for r in records] == ["a", "1", "2"] and len(records[1].fields[1]) == 2_000_000
+    assert time.monotonic() - started < 5
+
+
+def test_glued_quoted_and_unquoted_text_is_not_skipped():
+    """csv reads "001"23 as 00123; the raw line does not contain 00123, so it must not be skipped."""
+    data = b'ID,Name\n"001"23,Acme\nx, "00123" ,y\n9,"a"b"00123"\n'
+    expected = reference(data)
+    assert expected[1][0] == "00123"
+    found, _ = scan(data, 4096, needle=b"00123")
+    assert [r.fields for r in found if "00123" in r.fields] == [expected[1]]
+    assert [r.number for r in found] == [2, 3, 4]  # the other two lines hold the text and are examined
+
+
+def test_interruption_inside_a_chunk_of_candidates():
+    """Thousands of candidate records in one chunk: a normal scan returns them all; an interrupted one
+    stops within about a thousand records and says exactly where to resume."""
+    data = b"id,v\n" + b"".join(b"%d,KEY\n" % i for i in range(5000))
+    full, control = scan(data, 1 << 20, needle=b"KEY")
+    assert len(full) == 5000 and control.stop_reason == "end_of_file" and control.resume_record == 5001
+
+    control = ScanControl()
+    seen = []
+    for record in iter_records(io.BytesIO(data), chunk_bytes=1 << 20, needle=b"KEY", control=control):
+        seen.append(record)
+        if len(seen) == 1500:
+            control.stop.set()
+    assert control.stop_reason == "cancelled" and 1500 <= len(seen) < 1500 + 1100
+    assert control.resume_offset == seen[-1].end and control.resume_record == seen[-1].number
+    assert control.bytes_done == control.resume_offset
+    rest, _ = scan(data, 1 << 20, needle=b"KEY", start_offset=control.resume_offset, start_record=control.resume_record)
+    assert [(r.number, r.fields) for r in seen + rest] == [(r.number, r.fields) for r in full]
+
+
+def test_field_larger_than_the_limit_is_reported_as_an_overlong_record():
+    limit = 4 * 1024 * 1024
+    data = b"a,b\n1,2\n" + b'3,"' + b"x" * 1000 + b"\n" + (b"y" * 99 + b"\n") * 90_000
+    with pytest.raises(CsvParseError) as info:
+        scan(data, 1 << 20, max_record_bytes=limit)
+    assert "longer than max_record_bytes" in str(info.value) and "Record 3 starting at byte 8" in str(info.value)
+    assert (info.value.record_number, info.value.byte_offset) == (3, 8)
+    # Read in one piece, the record is complete before its length is known; the report must be the same.
+    with pytest.raises(CsvParseError) as info:
+        scan(data, 16 * 1024 * 1024, max_record_bytes=limit)
+    assert "longer than max_record_bytes" in str(info.value) and (info.value.record_number, info.value.byte_offset) == (3, 8)
+
+
+def test_other_encoding_hits_only_count_when_the_chunk_reads_as_that_encoding():
+    def hits(data: bytes, declared: str, alternatives: dict[str, bytes]) -> set[str]:
+        control = ScanControl(alt_needles=alternatives)
+        list(iter_records(io.BytesIO(data), encoding=declared, needle=b"zzz", control=control))
+        return control.alt_hits
+
+    nbsp_cp1252, nbsp_utf8 = " ".encode("cp1252"), " ".encode("utf-8")
+    # Declared utf-8: the cp1252 byte inside a valid UTF-8 file is a coincidence ...
+    assert hits("a,b\n ,x\n".encode("utf-8"), "utf-8", {"cp1252": nbsp_cp1252}) == set()
+    # ... but in a file that is not valid UTF-8 it is evidence.
+    assert hits("a,b\n ,é\n".encode("cp1252"), "utf-8", {"cp1252": nbsp_cp1252}) == {"cp1252"}
+    # Declared latin-1: UTF-8 bytes count only if the chunk really is UTF-8.
+    assert hits("a,b\n ,x\n".encode("utf-8"), "latin-1", {"utf-8": nbsp_utf8}) == {"utf-8"}
+    assert hits(b"a,b\n\xc2\xa0,\xe9\n", "latin-1", {"utf-8": nbsp_utf8}) == set()
+    # Two single-byte encodings cannot be told apart by validity: a hit always counts.
+    assert hits(b"a,b\n\x801,x\n", "latin-1", {"cp1252": b"\x801"}) == {"cp1252"}
+    assert hits(b"a,b\n\xc3\xa9,\x801\n", "latin-1", {"cp1252": b"\x801"}) == {"cp1252"}
+    assert hits(b"a,b\n\xc2\x801,x\n", "latin-1", {"cp1252": b"\x801"}) == {"cp1252"}  # even if it reads as UTF-8
+
+
+def test_record_limit_applies_to_records_that_arrive_whole():
+    """A closed quoted field longer than the limit, read in a single chunk, is still refused."""
+    data = b'a,b\n1,"' + b"x" * 5000 + b'"\n2,3\n'
+    with pytest.raises(CsvParseError) as info:
+        scan(data, 1 << 20, max_record_bytes=4096)
+    assert (info.value.record_number, info.value.byte_offset) == (2, 4)
+    records, _ = scan(data, 1 << 20, max_record_bytes=8192)
+    assert [len(r.fields) for r in records] == [2, 2, 2]
+    # ... and one scan's limit does not leak into another's.
+    with pytest.raises(CsvParseError):
+        scan(data, 1 << 20, max_record_bytes=4096)
+
+
+class CountingFile(io.BytesIO):
+    """Counts the bytes handed out, to show a scan stopped reading instead of buffering the file."""
+
+    consumed = 0
+
+    def read(self, size=-1):
+        data = super().read(size)
+        self.consumed += len(data)
+        return data
+
+
+@pytest.mark.parametrize("payload", [b'1,"never closed\n' + b"x,y\n" * 500_000, b"z" * 2_000_000])
+@pytest.mark.parametrize("needle", [None, b"zzz-not-there"])
+def test_runaway_record_stops_reading_early(payload, needle):
+    """Memory guard: an unclosed quote or an endless line is abandoned soon after max_record_bytes,
+    not after the whole remainder of the file has been buffered."""
+    fh = CountingFile(b"a,b\n" + payload)
+    with pytest.raises(CsvParseError):
+        list(iter_records(fh, chunk_bytes=1024, max_record_bytes=8192, needle=needle))
+    assert fh.consumed < 40_000
