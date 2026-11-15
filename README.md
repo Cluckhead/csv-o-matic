@@ -18,6 +18,10 @@ interpreting results is left to the LLM.
 - **Refuses to guess.** A file it cannot read reliably (wrong encoding, wrong delimiter, broken
   quoting, no header, changing while read) gets an explanation, never a false "absent".
 
+**New to it?** Open [`docs/guide.html`](docs/guide.html) in a browser: a one-page guide to the
+nine tools, from the basic idea to large files, comparisons and broken files, with real
+responses from invented data.
+
 ## Quick start
 
 Requires Python 3.11+.
@@ -172,7 +176,7 @@ whitespace, case or number formatting are still listed as changed, with a note.
 When a search finds things that are close but not exact, the response adds `near_misses`.
 These are never counted or returned as matches. It reports:
 
-- values that contain the search text inside a longer value (`263494` inside `0263494`, or
+- values that contain the search text inside a longer value (`417382` inside `0417382`, or
   part of a name inside the full name);
 - values that equal it apart from surrounding whitespace;
 - the exact value sitting in a column other than the one searched;
@@ -320,6 +324,7 @@ src/csv_o_matic/
   service.py       the nine tools as plain functions
   server.py        MCP wiring: tool definitions, progress, cancellation, concurrency
 process_maps/      example process maps
-scripts/           sample data generator, large-file acceptance check
+docs/guide.html    one-page guide to the tools (refresh its examples with scripts/build_guide.py)
+scripts/           sample data generator, guide builder, pandas check, large-file acceptance check
 tests/
 ```

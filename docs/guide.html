@@ -1,0 +1,1515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--PAGE:HEAD-->
+<title>CSV-o-Matic Field Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a contents rail beside one reading column; each tool is a "sheet" with its call and real response. */
+:root {
+  --bg: #f2f4f8;
+  --surface: #ffffff;
+  --sunken: #e9edf3;
+  --ink: #17202e;
+  --muted: #566277;
+  --line: #d3dae5;
+  --line-strong: #9aa6b8;
+  --accent: #2457d6;
+  --accent-soft: #e3ebff;
+  --found: #17734d;
+  --found-soft: #dff3e9;
+  --absent: #4a5670;
+  --absent-soft: #e2e7f0;
+  --unsure: #a85f00;
+  --unsure-soft: #fbecd2;
+  --error: #b3261e;
+  --error-soft: #fbe3e1;
+  --j-key: #1f4fbf;
+  --j-str: #0d6b4a;
+  --j-num: #9a4d00;
+  --j-lit: #7a3fb0;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --measure: 46rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141b; --surface: #171e28; --sunken: #111821; --ink: #e6ebf2; --muted: #9ba8ba;
+    --line: #2a3442; --line-strong: #56637a; --accent: #8fb0ff; --accent-soft: #1c2b4d;
+    --found: #62d3a2; --found-soft: #143427; --absent: #b3bfd3; --absent-soft: #242e3d;
+    --unsure: #f0b55c; --unsure-soft: #3a2a10; --error: #ff8f85; --error-soft: #401a17;
+    --j-key: #8fb0ff; --j-str: #7fd9ae; --j-num: #f0b55c; --j-lit: #c9a2f5;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141b; --surface: #171e28; --sunken: #111821; --ink: #e6ebf2; --muted: #9ba8ba;
+  --line: #2a3442; --line-strong: #56637a; --accent: #8fb0ff; --accent-soft: #1c2b4d;
+  --found: #62d3a2; --found-soft: #143427; --absent: #b3bfd3; --absent-soft: #242e3d;
+  --unsure: #f0b55c; --unsure-soft: #3a2a10; --error: #ff8f85; --error-soft: #401a17;
+  --j-key: #8fb0ff; --j-str: #7fd9ae; --j-num: #f0b55c; --j-lit: #c9a2f5;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 400 1rem/1.6 var(--font-body);
+}
+a { color: var(--accent); text-underline-offset: 0.15em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+code, pre, kbd { font-family: var(--font-mono); font-size: 0.875em; }
+p code, li code, td code, th code, figcaption code, dd code {
+  background: var(--sunken); border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.3em; overflow-wrap: anywhere;
+}
+h1, h2, h3, h4 { line-height: 1.2; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+
+.page {
+  max-width: 76rem; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 1.5rem 5rem;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem;
+}
+@media (min-width: 68rem) {
+  .page { grid-template-columns: 14.5rem minmax(0, 1fr); gap: 3.5rem; padding-block: 2.5rem 6rem; }
+}
+main { min-width: 0; display: flex; flex-direction: column; gap: 4.5rem; }
+
+/* ---- contents rail ---- */
+.rail { min-width: 0; font-size: 0.875rem; }
+.rail-inner { display: flex; flex-direction: column; gap: 1rem; }
+@media (min-width: 68rem) {
+  .rail-inner { position: sticky; top: calc(1.5rem + env(safe-area-inset-top, 0px)); max-height: calc(100vh - 3rem); overflow-y: auto; padding-right: 0.25rem; }
+}
+.brand { font: 600 0.95rem/1.2 var(--font-mono); letter-spacing: -0.01em; }
+.brand small { display: block; font: 400 0.75rem/1.4 var(--font-body); color: var(--muted); letter-spacing: 0; margin-top: 0.2rem; }
+.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.rail li a {
+  display: grid; grid-template-columns: 3.6rem minmax(0, 1fr); gap: 0.5rem; align-items: baseline;
+  padding: 0.3rem 0.5rem; border-radius: 6px; color: var(--ink); text-decoration: none;
+}
+.rail li a span { font: 500 0.6875rem/1.4 var(--font-mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.rail li a:hover { background: var(--sunken); }
+.rail li a[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.rail li a[aria-current="true"] span { color: var(--accent); }
+@media (max-width: 67.99rem) {
+  .rail ol { flex-direction: row; flex-wrap: wrap; gap: 0.35rem; }
+  .rail li a { display: block; border: 1px solid var(--line); background: var(--surface); padding: 0.25rem 0.6rem; }
+  .rail li a span { display: none; }
+}
+.theme-btn {
+  align-self: flex-start; font: 500 0.8125rem/1 var(--font-body); color: var(--muted); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.6rem; cursor: pointer;
+}
+.theme-btn:hover { color: var(--ink); border-color: var(--line-strong); }
+
+/* ---- hero ---- */
+.hero { display: grid; gap: 2rem; grid-template-columns: minmax(0, 1fr); align-items: end; }
+@media (min-width: 54rem) { .hero { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); } }
+.eyebrow { font: 500 0.75rem/1.4 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.hero h1 { font: 600 clamp(2.4rem, 6vw, 3.6rem)/1.02 var(--font-mono); letter-spacing: -0.04em; margin: 0.6rem 0 1rem; }
+.hero .lede { font-size: 1.1875rem; line-height: 1.5; max-width: 34rem; }
+.facts { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; padding: 0; list-style: none; }
+.facts li { font: 500 0.8125rem/1 var(--font-mono); border: 1px solid var(--line-strong); border-radius: 999px; padding: 0.45rem 0.75rem; }
+.ticket { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 0.8rem; min-width: 0; }
+.ticket-q { font-size: 1rem; line-height: 1.45; }
+.ticket-q b { font-weight: 600; }
+.ticket ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.875rem; }
+.ticket li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.6rem; align-items: center; }
+.ticket li code { overflow-wrap: anywhere; justify-self: start; }
+.ticket-a { border-top: 1px dashed var(--line-strong); padding-top: 0.8rem; font-size: 0.9375rem; }
+.label { font: 500 0.6875rem/1.4 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* ---- sections ---- */
+section { display: flex; flex-direction: column; gap: 1.5rem; scroll-margin-top: 1.5rem; }
+.sec-head { display: flex; flex-direction: column; gap: 0.6rem; max-width: var(--measure); }
+.sec-head h2 { font: 600 clamp(1.6rem, 3.6vw, 2.1rem)/1.15 var(--font-body); letter-spacing: -0.02em; }
+.level { font: 600 0.75rem/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.prose { display: flex; flex-direction: column; gap: 0.9rem; max-width: var(--measure); }
+.prose h3 { font: 600 1.2rem/1.25 var(--font-body); margin-top: 0.6rem; }
+.prose ul, .prose ol { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.sub { font: 600 1.2rem/1.25 var(--font-body); }
+.callout {
+  max-width: var(--measure); border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
+  padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9375rem;
+}
+.callout.warn { border-color: var(--unsure); background: var(--unsure-soft); }
+.callout strong { font-weight: 600; }
+
+/* ---- chips ---- */
+.chip { display: inline-block; font: 600 0.75rem/1 var(--font-mono); padding: 0.32rem 0.55rem; border-radius: 5px; white-space: nowrap; border: 1px solid transparent; }
+.chip.found { color: var(--found); background: var(--found-soft); border-color: var(--found); }
+.chip.absent { color: var(--absent); background: var(--absent-soft); border-color: var(--absent); }
+.chip.unsure { color: var(--unsure); background: var(--unsure-soft); border-color: var(--unsure); }
+.chip.error { color: var(--error); background: var(--error-soft); border-color: var(--error); }
+.chip.info { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+
+/* ---- layers and groups ---- */
+.layers { display: grid; gap: 0.5rem; max-width: var(--measure); }
+.layer { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.9rem; align-items: baseline; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem 0.9rem; }
+.layer:nth-child(2) { margin-left: 1rem; } .layer:nth-child(3) { margin-left: 2rem; } .layer:nth-child(4) { margin-left: 3rem; }
+.layer b { font: 600 0.875rem/1.3 var(--font-mono); }
+.layer span { font-size: 0.9375rem; }
+@media (max-width: 30rem) { .layer { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; } .layer:nth-child(n) { margin-left: 0; } }
+.groups { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.group { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.group h3 { font: 600 1rem/1.3 var(--font-body); }
+.group p { font-size: 0.875rem; color: var(--muted); }
+.group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.group li a { font: 500 0.8125rem/1.4 var(--font-mono); text-decoration: none; overflow-wrap: anywhere; }
+.group li a:hover { text-decoration: underline; }
+
+/* ---- tables ---- */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
+th, td { text-align: left; vertical-align: top; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 0.6875rem/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--sunken); white-space: nowrap; }
+td.mono, td .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.req { font: 600 0.6875rem/1 var(--font-mono); color: var(--accent); }
+.opt { font: 500 0.6875rem/1 var(--font-mono); color: var(--muted); }
+
+/* ---- diagram ---- */
+.diagram { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.diagram-scroll { overflow-x: auto; padding: 0.5rem; }
+.diagram svg { display: block; min-width: 46rem; width: 100%; height: auto; }
+.d-lane { fill: var(--sunken); }
+.d-lane-title { font: 600 13px var(--font-body); fill: var(--muted); }
+.d-edge { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
+.d-edge.dashed { stroke-dasharray: 5 4; }
+.d-arrow { fill: var(--line-strong); }
+.d-folder { font: 500 11px var(--font-mono); fill: var(--muted); }
+.d-store rect { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.d-store text { font: 500 11.5px var(--font-mono); fill: var(--ink); text-anchor: middle; }
+.step { cursor: pointer; }
+.step rect { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.5; }
+.step text { font: 500 12.5px var(--font-mono); fill: var(--ink); text-anchor: middle; pointer-events: none; }
+.step:hover rect { stroke: var(--accent); }
+.step[aria-pressed="true"] rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+.step[aria-pressed="true"] text { fill: var(--accent); font-weight: 600; }
+.step:focus-visible { outline: none; }
+.step:focus-visible rect { stroke: var(--accent); stroke-width: 3; }
+.step-panel { border-top: 1px solid var(--line); padding: 1rem 1.1rem 1.2rem; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.step-panel h3 { font: 600 1.05rem/1.3 var(--font-body); margin: 0.15rem 0 0.3rem; }
+.step-panel h3 code { font-weight: 500; font-size: 0.8125rem; background: var(--sunken); border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.35em; margin-left: 0.3rem; }
+.step-panel h4 { font: 500 0.6875rem/1.4 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem; }
+.step-panel ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.9rem; }
+.step-panel p { font-size: 0.9375rem; }
+.step-panel .full { grid-column: 1 / -1; }
+.step-panel code { overflow-wrap: anywhere; }
+
+/* ---- tool sheets ---- */
+.tool { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.4rem 1.2rem; display: flex; flex-direction: column; gap: 1.2rem; min-width: 0; scroll-margin-top: 1.5rem; }
+@media (min-width: 40rem) { .tool { padding: 1.75rem 1.75rem; } }
+.tool-head { display: flex; flex-direction: column; gap: 0.5rem; }
+.tool-head h3 { font: 600 clamp(1.25rem, 3.4vw, 1.7rem)/1.15 var(--font-mono); letter-spacing: -0.03em; overflow-wrap: anywhere; }
+.tool-head p { font-size: 1.0625rem; max-width: 40rem; }
+.tool-two { display: grid; gap: 1rem 1.5rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.tool-two > div { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.tool-two p, .tool-two ul { font-size: 0.9375rem; }
+.tool-two ul, .notes { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.notes { font-size: 0.9375rem; max-width: 44rem; }
+.note-p { font-size: 0.9375rem; max-width: 44rem; }
+#runs-table td.mono { overflow-wrap: anywhere; min-width: 11rem; }
+#runs-table .chip { white-space: normal; line-height: 1.3; }
+.tool h4 { font: 500 0.6875rem/1.4 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.block { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+
+/* ---- example viewer ---- */
+.ex { margin: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--sunken); min-width: 0; }
+.ex figcaption { padding: 0.65rem 0.85rem; font-size: 0.9rem; background: var(--surface); border-bottom: 1px solid var(--line); }
+.ex-part { padding: 0.7rem 0.85rem; display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+.ex-part + .ex-part { border-top: 1px solid var(--line); }
+.ex-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.ex-bar .tool-name { font: 600 0.8125rem/1.3 var(--font-mono); }
+.ex-bar .push { margin-left: auto; }
+.ex button, .lab button, .pager button {
+  font: 500 0.75rem/1 var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 5px; padding: 0.38rem 0.6rem; cursor: pointer;
+}
+.ex button:hover, .lab button:hover, .pager button:hover { border-color: var(--accent); color: var(--accent); }
+pre.json { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.8125rem; line-height: 1.55; max-height: 30rem; overflow-y: auto; }
+.j-key { color: var(--j-key); } .j-str { color: var(--j-str); } .j-num { color: var(--j-num); } .j-lit { color: var(--j-lit); }
+.j-more { color: var(--muted); font-style: italic; }
+
+/* ---- labs (interactive panels) ---- */
+.lab { border: 1px solid var(--accent); border-radius: 10px; background: var(--surface); padding: 1.1rem 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.lab-head { display: flex; flex-direction: column; gap: 0.25rem; }
+.lab-head h3 { font: 600 1.1rem/1.3 var(--font-body); }
+.lab-head p { font-size: 0.875rem; color: var(--muted); }
+.lab-controls { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: end; }
+.field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.field label, .field .label { font: 500 0.6875rem/1.4 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.field input[type="text"], .field select {
+  font: 500 0.9375rem/1.2 var(--font-mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line-strong);
+  border-radius: 6px; padding: 0.5rem 0.6rem; min-width: 0; max-width: 100%;
+}
+.presets { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.lab-out { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.lab-out > div { min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.lab-out p, .lab-out li { font-size: 0.9rem; }
+.lab-out ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.3rem; }
+tr.hit td { background: var(--found-soft); }
+tr.near td { background: var(--unsure-soft); }
+.ws { color: var(--error); font-weight: 600; }
+.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.35rem 0.9rem; font-size: 0.875rem; margin: 0; }
+.kv dt { font-family: var(--font-mono); color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+
+/* ---- outcome cards ---- */
+.outcomes { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.outcome { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.outcome p { font-size: 0.9375rem; }
+.outcome .means { color: var(--muted); font-size: 0.875rem; }
+
+/* ---- pager ---- */
+.pager { display: flex; flex-direction: column; gap: 0.75rem; }
+.pager-call { border: 1px solid var(--line); border-radius: 8px; background: var(--sunken); padding: 0.8rem 0.9rem; display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.pager-rows { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+.pager-rows li { font: 400 0.8125rem/1.4 var(--font-mono); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 0.35rem 0.55rem; overflow-wrap: anywhere; }
+
+/* ---- investigations ---- */
+.case { display: flex; flex-direction: column; gap: 1.25rem; }
+.case-report { border-left: 4px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; padding: 0.9rem 1.1rem; font-size: 1.0625rem; max-width: var(--measure); }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.25rem; counter-reset: s; }
+.steps > li { counter-increment: s; display: grid; grid-template-columns: 2.2rem minmax(0, 1fr); gap: 0.9rem; }
+.steps > li::before {
+  content: counter(s); font: 600 0.875rem/2.2rem var(--font-mono); width: 2.2rem; height: 2.2rem; text-align: center;
+  border-radius: 50%; border: 1.5px solid var(--accent); color: var(--accent); background: var(--surface);
+}
+.step-body { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.step-body h4 { font: 600 1.05rem/1.3 var(--font-body); }
+.step-body .think { color: var(--muted); font-size: 0.9375rem; }
+.step-body .learn { font-size: 0.9375rem; }
+.verdict { border: 1px solid var(--found); background: var(--found-soft); border-radius: 8px; padding: 1rem 1.1rem; max-width: var(--measure); display: flex; flex-direction: column; gap: 0.4rem; }
+.verdict h4 { font: 600 1rem/1.3 var(--font-body); }
+.verdict p { font-size: 0.9375rem; }
+
+footer { color: var(--muted); font-size: 0.875rem; max-width: var(--measure); }
+</style>
+<!--/PAGE:HEAD-->
+</head>
+<body>
+<!--PAGE:BODY-->
+<div class="page">
+
+<nav class="rail" aria-label="Contents">
+  <div class="rail-inner">
+    <div class="brand">CSV-o-Matic<small>Field guide to the nine tools</small></div>
+    <ol id="toc">
+      <li><a href="#idea"><span>Start</span>The idea</a></li>
+      <li><a href="#world"><span>Start</span>The invented world</a></li>
+      <li><a href="#answers"><span>Start</span>Three answers</a></li>
+      <li><a href="#orient"><span>Level 1</span>Find your way</a></li>
+      <li><a href="#inspect"><span>Level 2</span>Look at a file</a></li>
+      <li><a href="#search"><span>Level 3</span>Search for a value</a></li>
+      <li><a href="#scale"><span>Level 4</span>Very large files</a></li>
+      <li><a href="#compare"><span>Level 5</span>Compare two files</a></li>
+      <li><a href="#trouble"><span>Level 6</span>When the file is the problem</a></li>
+      <li><a href="#cases"><span>Practice</span>Two investigations</a></li>
+      <li><a href="#reference"><span>Lookup</span>Quick reference</a></li>
+    </ol>
+    <button class="theme-btn" id="theme-btn" type="button">Switch to dark</button>
+  </div>
+</nav>
+
+<main>
+
+<header class="hero" id="top">
+  <div>
+    <p class="eyebrow">Field guide</p>
+    <h1>CSV-o-Matic</h1>
+    <p class="lede">A read-only MCP server that lets a model investigate one security at a time across very large ETL CSV files. It reports what is in the files you point it at. Choosing the files and drawing conclusions stays with the model.</p>
+    <ul class="facts">
+      <li>9 tools</li><li>read-only</li><li>no database, no index</li><li>built for multi-gigabyte files</li>
+    </ul>
+  </div>
+  <aside class="ticket" aria-label="A typical question and how it is answered">
+    <p class="label">A typical question</p>
+    <p class="ticket-q">“Portfolio <b>PF003</b> holds Halvorsen Aerospace, but it is missing from the client holdings file. Why?”</p>
+    <ol>
+      <li><code>get_process_map</code><span class="chip info">route</span></li>
+      <li><code>search_across_columns</code><span class="chip found">match_found</span></li>
+      <li><code>count_matching_rows</code><span class="chip absent">confirmed_absent</span></li>
+      <li><code>find_security_in_file</code><span class="chip absent">confirmed_absent</span></li>
+    </ol>
+    <p class="ticket-a">The custodian sent SEDOL <code>417382</code>. The security master holds <code>0417382</code>. The join dropped the position. <a href="#cases">Follow it step by step</a>.</p>
+  </aside>
+</header>
+
+<div class="callout">
+  <p><strong>About the examples.</strong> Every company, identifier, portfolio and price on this page is invented. The responses are not: each one is real output from the server, run against that invented data. You can reproduce them with <code>python scripts/make_sample_data.py</code> and the example configuration.</p>
+</div>
+
+<!-- ============================================================ THE IDEA -->
+<section id="idea">
+  <div class="sec-head">
+    <p class="level">Start here</p>
+    <h2>The idea in one minute</h2>
+  </div>
+  <div class="prose">
+    <p>An ETL process moves data through a chain of folders. Each step reads CSV files from one folder and writes new ones to the next. When a security goes missing or a value looks wrong, the answer is in those files: the last file that has it, the first that does not, and the rule in between.</p>
+    <p>The files can be several gigabytes each, so a model cannot read them. CSV-o-Matic gives it nine tools that answer narrow questions about them. The division of labour is strict.</p>
+    <ul>
+      <li><strong>The model</strong> decides which process, folder and file to look at, follows the chain upstream and downstream, and explains what it finds.</li>
+      <li><strong>The server</strong> reads the file it is asked about, from disk, at that moment, and reports exactly what is there. It keeps no copy and no index, and it never writes.</li>
+    </ul>
+    <p>Everything is organised in four layers. Each tool works at one of them.</p>
+  </div>
+  <div class="layers">
+    <div class="layer"><b>Process</b><span>A named ETL flow with steps, described in a maintained process map.</span></div>
+    <div class="layer"><b>Folder</b><span>Where one step leaves its output. Only folders named in a process map can be read.</span></div>
+    <div class="layer"><b>File</b><span>One CSV per run. Its name carries a business date and a run timestamp.</span></div>
+    <div class="layer"><b>Row</b><span>One record for a security. Matched by exact text, returned with its column labels.</span></div>
+  </div>
+  <div class="groups">
+    <div class="group">
+      <h3>Find your way</h3>
+      <p>Understand the process and locate the right file.</p>
+      <ul>
+        <li><a href="#tool-get-process-map">get_process_map</a></li>
+        <li><a href="#tool-list-folders">list_folders</a></li>
+        <li><a href="#tool-list-csv-files">list_csv_files</a></li>
+      </ul>
+    </div>
+    <div class="group">
+      <h3>Look at a file</h3>
+      <p>Learn its columns before searching it.</p>
+      <ul>
+        <li><a href="#tool-inspect-csv-headers">inspect_csv_headers</a></li>
+        <li><a href="#tool-search-column-names">search_column_names</a></li>
+      </ul>
+    </div>
+    <div class="group">
+      <h3>Search and compare</h3>
+      <p>Get evidence about one security.</p>
+      <ul>
+        <li><a href="#tool-find-security-in-file">find_security_in_file</a></li>
+        <li><a href="#tool-search-across-columns">search_across_columns</a></li>
+        <li><a href="#tool-count-matching-rows">count_matching_rows</a></li>
+        <li><a href="#tool-compare-security-records">compare_security_records</a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ THE WORLD -->
+<section id="world">
+  <div class="sec-head">
+    <p class="level">Start here</p>
+    <h2>The invented world used in every example</h2>
+  </div>
+  <div class="prose">
+    <p>Two processes run each weekday. The <strong>Security Master Build</strong> turns a vendor reference file into one golden security master, splitting into an equity branch and a fixed income branch on the way. <strong>End-of-Day Positions</strong> joins custodian positions to that golden master, then feeds a client report and a risk feed.</p>
+    <p>Select a step to see what the process map says about it. This panel is filled from the same <code>get_process_map</code> responses shown later.</p>
+  </div>
+
+  <div class="diagram">
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 940 436" role="group" aria-label="The two example processes and their steps">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-arrow" d="M0 0 L10 5 L0 10 z"></path></marker>
+        </defs>
+        <rect class="d-lane" x="0" y="0" width="940" height="206" rx="8"></rect>
+        <rect class="d-lane" x="0" y="222" width="940" height="214" rx="8"></rect>
+        <text class="d-lane-title" x="16" y="24">Security Master Build</text>
+        <text class="d-lane-title" x="16" y="246">End-of-Day Positions</text>
+
+        <path class="d-edge" d="M170 108 H208" marker-end="url(#arr)"></path>
+        <text class="d-folder" x="94" y="150" text-anchor="middle">writes 01_vendor_raw</text>
+        <path class="d-edge" d="M360 100 C385 100 385 61 408 61" marker-end="url(#arr)"></path>
+        <path class="d-edge" d="M360 116 C385 116 385 153 408 153" marker-end="url(#arr)"></path>
+        <text class="d-folder" x="285" y="150" text-anchor="middle">writes 02_normalised</text>
+        <path class="d-edge" d="M560 61 C590 61 590 100 618 100" marker-end="url(#arr)"></path>
+        <path class="d-edge" d="M560 153 C590 153 590 116 618 116" marker-end="url(#arr)"></path>
+        <text class="d-folder" x="485" y="26" text-anchor="middle">03a_equity_enriched</text>
+        <text class="d-folder" x="485" y="194" text-anchor="middle">03b_fixed_income_enriched</text>
+        <path class="d-edge" d="M770 108 H798" marker-end="url(#arr)"></path>
+        <g class="d-store"><rect x="800" y="88" width="124" height="40" rx="6"></rect><text x="862" y="113">04_golden</text></g>
+
+        <path class="d-edge dashed" d="M862 128 V268 H485 V298" marker-end="url(#arr)"></path>
+        <text class="d-folder" x="674" y="262" text-anchor="middle">enrich also reads 04_golden</text>
+
+        <path class="d-edge" d="M360 323 H408" marker-end="url(#arr)"></path>
+        <text class="d-folder" x="285" y="364" text-anchor="middle">writes 01_custodian_raw</text>
+        <path class="d-edge" d="M560 315 C590 315 590 303 618 303" marker-end="url(#arr)"></path>
+        <path class="d-edge" d="M560 331 C590 331 590 387 618 387" marker-end="url(#arr)"></path>
+        <text class="d-folder" x="485" y="364" text-anchor="middle">writes 02_enriched</text>
+        <text class="d-folder" x="780" y="307">03a_client_report</text>
+        <text class="d-folder" x="780" y="391">03b_risk_feed</text>
+
+        <g class="step" data-proc="security_master" data-step="ingest" tabindex="0" role="button" aria-pressed="false"><rect x="20" y="85" width="150" height="46" rx="8"></rect><text x="95" y="113">ingest</text></g>
+        <g class="step" data-proc="security_master" data-step="normalise" tabindex="0" role="button" aria-pressed="false"><rect x="210" y="85" width="150" height="46" rx="8"></rect><text x="285" y="113">normalise</text></g>
+        <g class="step" data-proc="security_master" data-step="enrich_equity" tabindex="0" role="button" aria-pressed="false"><rect x="410" y="38" width="150" height="46" rx="8"></rect><text x="485" y="66">enrich_equity</text></g>
+        <g class="step" data-proc="security_master" data-step="enrich_fixed_income" tabindex="0" role="button" aria-pressed="false"><rect x="410" y="130" width="150" height="46" rx="8"></rect><text x="485" y="158">enrich_fixed_income</text></g>
+        <g class="step" data-proc="security_master" data-step="publish" tabindex="0" role="button" aria-pressed="false"><rect x="620" y="85" width="150" height="46" rx="8"></rect><text x="695" y="113">publish</text></g>
+        <g class="step" data-proc="eod_positions" data-step="load_custodian" tabindex="0" role="button" aria-pressed="false"><rect x="210" y="300" width="150" height="46" rx="8"></rect><text x="285" y="328">load_custodian</text></g>
+        <g class="step" data-proc="eod_positions" data-step="enrich" tabindex="0" role="button" aria-pressed="false"><rect x="410" y="300" width="150" height="46" rx="8"></rect><text x="485" y="328">enrich</text></g>
+        <g class="step" data-proc="eod_positions" data-step="client_report" tabindex="0" role="button" aria-pressed="false"><rect x="620" y="280" width="150" height="46" rx="8"></rect><text x="695" y="308">client_report</text></g>
+        <g class="step" data-proc="eod_positions" data-step="risk_feed" tabindex="0" role="button" aria-pressed="false"><rect x="620" y="364" width="150" height="46" rx="8"></rect><text x="695" y="392">risk_feed</text></g>
+      </svg>
+    </div>
+    <div class="step-panel" id="step-panel" aria-live="polite"></div>
+  </div>
+
+  <div class="prose">
+    <h3>The cast</h3>
+    <p>Each of these was put into the data so that something happens to it. You will meet them again in the examples.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Security</th><th>Identifiers</th><th>What is special about it</th></tr></thead>
+      <tbody>
+        <tr><td>Halvorsen Aerospace PLC</td><td class="mono">GB0004173829<br>SEDOL 0417382</td><td>Its SEDOL starts with a zero. One custodian row has lost that zero.</td></tr>
+        <tr><td>Larkspur Holdings, Inc.</td><td class="mono">US5128471093<br>SEDOL 2619045</td><td>A comma in its name. The vendor corrected its price from 452.11 to 455.00 in a second delivery.</td></tr>
+        <tr><td>Tidewater Energy PLC</td><td class="mono">GB00B7K2MN41<br>SEDOL B7K2MN4</td><td>Listed twice in the vendor file, on two exchanges. Only the primary listing is published.</td></tr>
+        <tr><td>Corbel Mining PLC</td><td class="mono">GB0006291573</td><td>The vendor marks it <code>DELISTED</code>.</td></tr>
+        <tr><td>Marlow Finance 4.5% 2031</td><td class="mono">XS2048815523</td><td>A bond whose name contains a line break inside the CSV field.</td></tr>
+        <tr><td>Old Quay 3% 2025</td><td class="mono">XS1190347765</td><td>A bond that matured before the business date.</td></tr>
+        <tr><td>Brightwater Warrant Series A</td><td class="mono">GB00BWRT0A19</td><td>Neither an equity nor a bond, so it enters neither branch.</td></tr>
+        <tr><td>Pendle Robotics PLC</td><td class="mono">GB00BPNDL008<br>SEDOL 0058213</td><td>Missing from the first vendor delivery on 13 November. It arrives in the second.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ THREE ANSWERS -->
+<section id="answers">
+  <div class="sec-head">
+    <p class="level">Start here</p>
+    <h2>Every search gives one of three answers</h2>
+  </div>
+  <div class="prose">
+    <p>This is the most important idea on the page. “Not found” can mean two different things: the value is not in the file, or the server could not finish looking. CSV-o-Matic never lets those blur. Each search result carries an <code>outcome</code>.</p>
+  </div>
+  <div class="outcomes">
+    <div class="outcome">
+      <span><span class="chip found">match_found</span></span>
+      <p>At least one row holds the value exactly.</p>
+      <p class="means">A match does not mean you have every match. Check <code>results_are_partial</code>.</p>
+    </div>
+    <div class="outcome">
+      <span><span class="chip absent">confirmed_absent</span></span>
+      <p>The whole file was read and no row holds the value exactly.</p>
+      <p class="means">Only given after a complete, trustworthy scan. This is evidence you can state.</p>
+    </div>
+    <div class="outcome">
+      <span><span class="chip unsure">inconclusive</span></span>
+      <p>No match was seen, but absence is not proven.</p>
+      <p class="means">The scan was cut short, or the file could not be read reliably. Never report this as absent.</p>
+    </div>
+  </div>
+  <div class="prose">
+    <p>Alongside the outcome, each result has a <code>scan</code> block saying how far the scan got and why it stopped, and an <code>explanation</code> in plain words. Use the panel below to see how they combine.</p>
+  </div>
+
+  <div class="lab" id="decoder">
+    <div class="lab-head">
+      <h3>Outcome decoder</h3>
+      <p>Runs in your browser. It applies the same rules the server uses to label a search result.</p>
+    </div>
+    <div class="lab-controls">
+      <div class="field"><label for="dec-stop">Why the scan stopped</label>
+        <select id="dec-stop">
+          <option value="end_of_file">end_of_file: it read the whole file</option>
+          <option value="row_limit">row_limit: enough rows for one response</option>
+          <option value="output_size_limit">output_size_limit: response was full</option>
+          <option value="time_limit">time_limit: it ran out of time</option>
+          <option value="cancelled">cancelled: the client cancelled it</option>
+          <option value="error">error: the file could not be parsed</option>
+        </select></div>
+      <div class="field"><label for="dec-match">Exact matches seen so far</label>
+        <select id="dec-match"><option value="0">none</option><option value="1">one or more</option></select></div>
+      <div class="field"><label for="dec-sound">The file itself</label>
+        <select id="dec-sound"><option value="1">read cleanly</option><option value="0">has a problem (changed during the scan, unclosed quote, wrong encoding or delimiter)</option></select></div>
+    </div>
+    <div class="lab-out">
+      <div><p class="label">The response says</p><dl class="kv" id="dec-fields"></dl></div>
+      <div><p class="label">What you may conclude</p><p id="dec-meaning"></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ LEVEL 1 -->
+<section id="orient">
+  <div class="sec-head">
+    <p class="level">Level 1</p>
+    <h2>Find your way: process, folders, files</h2>
+    <p>Before searching anything, the model needs to know how the process works and which file to open. Three tools cover that. None of them reads a CSV's contents.</p>
+  </div>
+
+  <article class="tool" id="tool-get-process-map">
+    <div class="tool-head">
+      <p class="label">Tool 1 of 9</p>
+      <h3>get_process_map</h3>
+      <p>Describes an ETL process: its steps, folders, how files are named, which columns identify a security, and the rules that change or drop rows.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>Starting any investigation, and again whenever you need the rule that explains a difference between two folders.</p></div>
+      <div><h4>Where the answer comes from</h4><p>Maintained YAML files, one per process. They are re-read on every call, so an edit is live at once.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">process</td><td><span class="opt">optional</span></td><td>Process id or name. Leave it out to list the processes that exist.</td></tr>
+          <tr><td class="mono">step_id</td><td><span class="opt">optional</span></td><td>Return one step in full, with the folders it touches. Useful when a whole map is too large for one response.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figure class="ex" data-ex="pm_list" data-keys="processes,next_step"><figcaption>With no arguments it lists what there is to choose from.</figcaption></figure>
+    <figure class="ex" data-ex="pm_step" data-keys="step"><figcaption>One step in full. Here is the step that joins positions to the security master. Its <code>filter_rules</code> are the usual explanation for a missing security.</figcaption></figure>
+    <ul class="notes">
+      <li><strong>Branches</strong> show up as a step with several <code>downstream</code> steps, each with a <code>branch_condition</code>.</li>
+      <li><strong>run_semantics</strong> says how retries, reruns and backfills appear in the files. Read it before comparing two files for the same date.</li>
+      <li><strong>field_mappings</strong> give the column name on each side of a step, which you need when a column is renamed.</li>
+      <li>A map with a mistake in it is left out and reported under <code>process_map_load_errors</code>.</li>
+    </ul>
+  </article>
+
+  <article class="tool" id="tool-list-folders">
+    <div class="tool-head">
+      <p class="label">Tool 2 of 9</p>
+      <h3>list_folders</h3>
+      <p>Lists the folders the process maps describe, with what each holds and which steps read or write it.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>Deciding where to look. The <code>folder</code> value of an entry is what every other tool expects.</p></div>
+      <div><h4>Worth knowing</h4><p>This is the allow-list. A folder that is not in a process map cannot be read by any tool.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">process</td><td><span class="opt">optional</span></td><td>Only this process's folders. Leave it out for every folder.</td></tr>
+          <tr><td class="mono">offset</td><td><span class="opt">optional</span></td><td>Continue a listing that was cut short, using its <code>next_offset</code>.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figure class="ex" data-ex="folders" data-keys="scope,total_folders,folders.0,folders.4"><figcaption>Folders of the positions process. The first entry is an ordinary folder. The last is the golden master, which this process only reads.</figcaption></figure>
+    <ul class="notes">
+      <li>A folder shared by two processes appears once, with both under <code>used_by</code>.</li>
+      <li><code>exists_on_disk</code> tells you at once if a mapped folder is missing.</li>
+      <li><code>identifier_columns</code> names the column to search and what kind of identifier it holds.</li>
+    </ul>
+  </article>
+
+  <article class="tool" id="tool-list-csv-files">
+    <div class="tool-head">
+      <p class="label">Tool 3 of 9</p>
+      <h3>list_csv_files</h3>
+      <p>Lists the CSV files that exist in one folder right now, with size, modification time, and the dates read from each filename.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>Choosing which run to open. Several files for one business date is a finding in itself.</p></div>
+      <div><h4>Two kinds of time</h4><p><code>filename_tokens</code> hold the business date and run timestamp. <code>filesystem_modified_time</code> is only when the file landed on this disk.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">folder</td><td><span class="req">required</span></td><td>Folder path as returned by <code>list_folders</code>.</td></tr>
+          <tr><td class="mono">filename_contains</td><td><span class="opt">optional</span></td><td>Keep filenames containing this text. Case does not matter.</td></tr>
+          <tr><td class="mono">date_from, date_to</td><td><span class="opt">optional</span></td><td>Inclusive date range, <code>YYYY-MM-DD</code>.</td></tr>
+          <tr><td class="mono">date_field</td><td><span class="opt">optional</span></td><td>Which date the range applies to: a filename token such as <code>business_date</code> or <code>run_timestamp</code>, or <code>filesystem_modified</code>. Defaults to the folder's main filename date.</td></tr>
+          <tr><td class="mono">newest_first</td><td><span class="opt">optional</span></td><td>Sort filenames descending (the default) or ascending.</td></tr>
+          <tr><td class="mono">offset</td><td><span class="opt">optional</span></td><td>Continue a truncated listing.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figure class="ex" data-ex="files_golden" data-keys="filters,total_matching_files,files,time_fields"><figcaption>The golden master for business date 13 November. There are two files: the build ran twice.</figcaption></figure>
+
+    <div class="block">
+      <h4>Reading a folder: runs, reruns and backfills</h4>
+      <p class="note-p">The whole normalised folder, as <code>list_csv_files</code> returned it, with each file classified from its filename tokens alone. Note that every file has the same modification time, because the share was copied overnight. That is why modification time is never used as a business date.</p>
+      <div class="table-wrap"><table id="runs-table">
+        <thead><tr><th>File</th><th>Business date</th><th>Run started</th><th>Modified on disk</th><th>How to read it</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+    <ul class="notes">
+      <li>Only regular <code>.csv</code> files directly in the folder are listed. Links, subfolders and other files are counted under <code>other_entries_ignored</code>.</li>
+      <li>A file whose name does not fit the folder's convention is still listed, with <code>matches_filename_convention: false</code>.</li>
+      <li>Filtering on a filename date leaves out files with no readable date, and says how many.</li>
+    </ul>
+  </article>
+</section>
+
+<!-- ============================================================ LEVEL 2 -->
+<section id="inspect">
+  <div class="sec-head">
+    <p class="level">Level 2</p>
+    <h2>Look at a file before searching it</h2>
+    <p>A search needs an exact column name. These two tools give you the layout of a file without reading its data.</p>
+  </div>
+
+  <article class="tool" id="tool-inspect-csv-headers">
+    <div class="tool-head">
+      <p class="label">Tool 4 of 9</p>
+      <h3>inspect_csv_headers</h3>
+      <p>Returns a file's column names in their original order. On request it adds a few leading rows so you can see what the values look like.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>You are about to search a file you have not seen, or a search failed with <code>column_not_found</code>.</p></div>
+      <div><h4>Do not use it for</h4><p>Deciding whether a security is present. The sample is only the top of the file.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">folder, filename</td><td><span class="req">required</span></td><td>The file, named exactly as <code>list_csv_files</code> returned it.</td></tr>
+          <tr><td class="mono">sample_rows</td><td><span class="opt">optional</span></td><td>How many leading data rows to include. Default 0. The server caps it at 10 by default.</td></tr>
+          <tr><td class="mono">sample_columns</td><td><span class="opt">optional</span></td><td>Limit the sample to these columns.</td></tr>
+          <tr><td class="mono">column_offset</td><td><span class="opt">optional</span></td><td>Continue a column list that was cut short.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figure class="ex" data-ex="headers" data-keys="column_count,columns,columns_truncated"><figcaption>Headers only. This is the default and returns no data at all.</figcaption></figure>
+    <figure class="ex" data-ex="headers_sample" data-keys="sample_rows,sample_note"><figcaption>The same file with two sample rows, limited to four columns.</figcaption></figure>
+    <ul class="notes">
+      <li>If a name appears twice in the header, rows label the columns <code>name [col N]</code>, and you select one as <code>#N</code>.</li>
+      <li>A header that reads as one column full of semicolons, tabs or pipes gets a warning that the folder's delimiter is probably wrong.</li>
+    </ul>
+  </article>
+
+  <article class="tool" id="tool-search-column-names">
+    <div class="tool-head">
+      <p class="label">Tool 5 of 9</p>
+      <h3>search_column_names</h3>
+      <p>Finds the columns whose names contain a term, and tells you where they sit.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>The file has hundreds of columns and you want the price or identifier ones without pulling the whole header.</p></div>
+      <div><h4>How it matches</h4><p>Part of the name is enough and case is ignored. This is the one place matching is loose, because it is about names, not data.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">folder, filename</td><td><span class="req">required</span></td><td>The file.</td></tr>
+          <tr><td class="mono">term</td><td><span class="req">required</span></td><td>Text to look for inside column names.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figure class="ex" data-ex="column_search" data-keys="term,match_type,column_count,matching_columns"><figcaption>Which column of the enriched positions file holds a price?</figcaption></figure>
+    <ul class="notes">
+      <li>When nothing matches, <code>similar_column_names</code> offers the closest names.</li>
+    </ul>
+  </article>
+</section>
+
+<!-- ============================================================ LEVEL 3 -->
+<section id="search">
+  <div class="sec-head">
+    <p class="level">Level 3</p>
+    <h2>Search for a value</h2>
+    <p>Three tools read the data. They share one matching rule, so learn the rule first.</p>
+  </div>
+  <div class="prose">
+    <h3>The matching rule: exact text, whole field</h3>
+    <p>A row matches when the field equals the search value character for character. Nothing is converted. So <code>0417382</code> and <code>417382</code> are different values, <code>Halvorsen</code> does not match <code>Halvorsen Aerospace PLC</code>, and a trailing space makes a different value. Any exact value can be searched for, not only security identifiers. A portfolio code works just as well.</p>
+    <p>Strictness would be unhelpful on its own, so the server also reports <strong>near misses</strong>: values that are not matches but explain why there was none. Try it.</p>
+  </div>
+
+  <div class="lab" id="matcher">
+    <div class="lab-head">
+      <h3>Exact-match bench</h3>
+      <p>An illustration that runs in your browser on four invented rows. It follows the server's rule and its near-miss categories.</p>
+    </div>
+    <div class="lab-controls">
+      <div class="field"><label for="m-value">Search value</label><input id="m-value" type="text" value="417382" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="m-col">Search in</label>
+        <select id="m-col"><option value="sedol">column sedol (find_security_in_file)</option><option value="*">any column (search_across_columns)</option></select></div>
+      <div class="field"><span class="label">Try</span>
+        <div class="presets" id="m-presets">
+          <button type="button" data-v="0417382">0417382</button><button type="button" data-v="417382">417382</button>
+          <button type="button" data-v="Halvorsen">Halvorsen</button><button type="button" data-v="B7K2MN4">B7K2MN4</button>
+          <button type="button" data-v="0417381">0417381</button><button type="button" data-v="9999999">9999999</button>
+        </div></div>
+    </div>
+    <div class="table-wrap"><table id="m-table">
+      <thead><tr><th>Record</th><th>sedol</th><th>name</th><th>previous_sedol</th></tr></thead><tbody></tbody>
+    </table></div>
+    <div class="lab-out">
+      <div><p class="label">outcome</p><p id="m-outcome"></p><p id="m-explain"></p></div>
+      <div><p class="label">near_misses</p><ul id="m-near"></ul></div>
+    </div>
+  </div>
+
+  <article class="tool" id="tool-find-security-in-file">
+    <div class="tool-head">
+      <p class="label">Tool 6 of 9</p>
+      <h3>find_security_in_file</h3>
+      <p>Returns the rows of one file whose chosen column equals the value exactly, with their original column labels.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>You know which column holds the identifier. This is the main evidence tool.</p></div>
+      <div><h4>It returns</h4><p>The whole row, or just the columns you ask for. Values are text exactly as in the file.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">folder, filename</td><td><span class="req">required</span></td><td>The file to search.</td></tr>
+          <tr><td class="mono">identifier</td><td><span class="req">required</span></td><td>The value to match, as text. Up to 200 characters.</td></tr>
+          <tr><td class="mono">identifier_column</td><td><span class="req">required</span></td><td>Exact column name, or <code>#N</code> for the Nth column.</td></tr>
+          <tr><td class="mono">columns</td><td><span class="opt">optional</span></td><td>Return only these columns. Leave out for the whole row.</td></tr>
+          <tr><td class="mono">max_rows</td><td><span class="opt">optional</span></td><td>Rows in this response. The server caps it at 25 by default.</td></tr>
+          <tr><td class="mono">cursor</td><td><span class="opt">optional</span></td><td>A <code>next_cursor</code> from an earlier response of this same search. See <a href="#scale">Level 4</a>.</td></tr>
+          <tr><td class="mono">max_scan_seconds</td><td><span class="opt">optional</span></td><td>A shorter time budget for this call. See <a href="#scale">Level 4</a>.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figure class="ex" data-ex="find_match" data-keys="outcome,matches,explanation,scan"><figcaption>A straightforward hit. Look up Halvorsen by SEDOL in the golden master.</figcaption></figure>
+    <figure class="ex" data-ex="find_lost_zero" data-keys="outcome,explanation,near_misses"><figcaption>The same search with the leading zero lost. The outcome is a definite “absent”, and <code>near_misses</code> shows the value that is one character away.</figcaption></figure>
+    <figure class="ex" data-ex="find_multiline" data-keys="search,matches"><figcaption>Asking for three columns only. This bond's name contains a line break inside a quoted field. It comes back intact, as <code>\n</code> in the JSON.</figcaption></figure>
+    <figure class="ex" data-ex="find_absent" data-keys="outcome,explanation,scan"><figcaption>A clean absence. Pendle Robotics is not in the 18:30 golden file, and nothing resembling its ISIN is either.</figcaption></figure>
+    <ul class="notes">
+      <li><code>record_number</code> counts from 1 with the header as record 1, so it equals the spreadsheet row number unless a field contains a line break.</li>
+      <li><code>records_after_header</code> in the scan block is how many records the file has. A file with a header and nothing else shows 0, which is often the real answer.</li>
+      <li>A row with more or fewer fields than the header is still returned, with a <code>field_count_mismatch</code> note.</li>
+      <li>Very long cell values are cut and listed under <code>truncated_cells</code>.</li>
+    </ul>
+  </article>
+
+  <div class="prose">
+    <h3>What near_misses reports</h3>
+    <p>Near misses are never counted or returned as matches. They cost nothing extra, because only records containing the search text are ever examined. There are four kinds.</p>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Field</th><th>Meaning</th><th>Typical cause</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">identifier_inside_a_longer_value</td><td>The text sits inside a longer value in the searched column.</td><td>A lost leading zero, a partial name, a prefix or suffix added by a step.</td></tr>
+      <tr><td class="mono">same_value_with_surrounding_whitespace</td><td>Equal once spaces are trimmed.</td><td>Padded fixed-width exports.</td></tr>
+      <tr><td class="mono">exact_value_in_other_columns</td><td>The exact value is in the row, in a different column.</td><td>You searched the wrong column.</td></tr>
+      <tr><td class="mono">inside_a_multi_line_value_in_another_column</td><td>The text is inside a value that spans lines.</td><td>An unclosed quote has swallowed whole rows.</td></tr>
+    </tbody>
+  </table></div>
+
+  <article class="tool" id="tool-search-across-columns">
+    <div class="tool-head">
+      <p class="label">Tool 7 of 9</p>
+      <h3>search_across_columns</h3>
+      <p>Returns the rows where any column equals the value exactly, and names every column that matched.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>You do not know which column holds the identifier, or you want to know where else a value appears.</p></div>
+      <div><h4>It returns</h4><p>Each matching row once, with <code>matched_columns</code>. Matched columns are always included in the returned values.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">folder, filename, identifier</td><td><span class="req">required</span></td><td>As for <code>find_security_in_file</code>, without a column.</td></tr>
+          <tr><td class="mono">columns, max_rows, cursor, max_scan_seconds</td><td><span class="opt">optional</span></td><td>As for <code>find_security_in_file</code>.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figure class="ex" data-ex="across" data-keys="outcome,matches,near_misses"><figcaption>Where does <code>417382</code> appear in the custodian file? One row, in <code>SecurityId</code>. The near misses show two rows holding <code>0417382</code>.</figcaption></figure>
+    <figure class="ex" data-ex="across_name" data-keys="outcome,explanation,near_misses"><figcaption>Searching on part of a name gives no match, and the near miss hands you the full name and its column. A second call with the full name gets the row.</figcaption></figure>
+    <figure class="ex" data-ex="across_both" data-keys="search,matches"><figcaption>Asking for two columns. The matched column <code>sedol</code> is added to each row automatically.</figcaption></figure>
+    <ul class="notes">
+      <li>A row holding the value in three columns is returned once, with all three listed.</li>
+      <li>This is the way from a name to an identifier: search the name, read the near miss, search again with the exact value.</li>
+    </ul>
+  </article>
+
+  <article class="tool" id="tool-count-matching-rows">
+    <div class="tool-head">
+      <p class="label">Tool 8 of 9</p>
+      <h3>count_matching_rows</h3>
+      <p>Returns the exact number of rows whose chosen column equals the value, without returning any rows.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>You need “how many” or a firm zero, and the rows themselves would only use up the response.</p></div>
+      <div><h4>The rule</h4><p>A number is given only after a complete scan. Otherwise <code>count</code> is <code>null</code>.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">folder, filename, identifier, identifier_column</td><td><span class="req">required</span></td><td>As for <code>find_security_in_file</code>.</td></tr>
+          <tr><td class="mono">cursor, max_scan_seconds</td><td><span class="opt">optional</span></td><td>Continue an interrupted count, or shorten the time budget.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <figure class="ex" data-ex="count" data-keys="outcome,count,count_is_exact,explanation,scan"><figcaption>How many listings in the vendor file are on exchange <code>XLON</code>?</figcaption></figure>
+    <figure class="ex" data-ex="count_zero" data-keys="outcome,count,count_is_exact,explanation"><figcaption>A firm zero. Portfolio PF003 has no rows at all in the enriched positions.</figcaption></figure>
+    <ul class="notes">
+      <li>An interrupted count reports <code>matches_seen_before_interruption</code>. That is a lower bound and must not be quoted as the count.</li>
+      <li>Near misses are reported here too, so a zero caused by the wrong column is visible.</li>
+    </ul>
+  </article>
+</section>
+
+<!-- ============================================================ LEVEL 4 -->
+<section id="scale">
+  <div class="sec-head">
+    <p class="level">Level 4</p>
+    <h2>Very large files: limits, cursors, time</h2>
+    <p>The examples so far ran on small files and finished at once. On a multi-gigabyte file three things change: responses fill up, scans take time, and scans can be cut short. The server handles each one openly.</p>
+  </div>
+
+  <div class="prose">
+    <h3>Responses are bounded, and say when they are cut</h3>
+    <p>One response carries at most a set number of rows and a set number of bytes. When a search stops because the response is full, it says so in three places: <code>results_are_partial</code> is true, <code>more_matches</code> is <code>"yes"</code>, and the explanation begins with “PARTIAL RESULTS”.</p>
+    <p>The server only says <code>"yes"</code> when it has actually seen a further match. It reads on until it finds the next one before stopping.</p>
+  </div>
+  <figure class="ex" data-ex="truncated" data-keys="outcome,matches_returned,more_matches,results_are_partial,explanation,scan,next_cursor"><figcaption>There are 2,007 rows on XLON. Asking for three returns three, and makes it plain there are more.</figcaption></figure>
+
+  <div class="prose">
+    <h3>Cursors continue where a response stopped</h3>
+    <p>A partial response carries a <code>next_cursor</code>. Send the same call again with that cursor and the scan resumes at the exact byte where it stopped, without re-reading the start of the file. Repeat until <code>more_matches</code> is <code>"none"</code>.</p>
+  </div>
+  <div class="lab">
+    <div class="lab-head">
+      <h3>Paging through matches</h3>
+      <p>Real responses. Portfolio PF001 has four rows in the custodian file and the call asks for two at a time.</p>
+    </div>
+    <div class="pager" id="pager"></div>
+  </div>
+  <div class="prose">
+    <ul>
+      <li>A cursor belongs to one search on one file. Using it with a different value, column or tool is refused.</li>
+      <li>It is tied to the file's size and modification time. If the file changes, the cursor stops working and the search must start again.</li>
+      <li>Cursors do not survive a server restart.</li>
+    </ul>
+
+    <h3>Scans have a time budget</h3>
+    <p>Each scan may run for a configured maximum, 120 seconds by default. A call can ask for less with <code>max_scan_seconds</code>. When time runs out the scan stops and returns what it has, marked incomplete, with a cursor to carry on. Every call reads at least one chunk of the file, so a chain of cursors always reaches the end.</p>
+  </div>
+  <figure class="ex" data-ex="time_limit" data-keys="outcome,count,count_is_exact,matches_seen_before_interruption,explanation,scan"><figcaption>A count that ran out of time. To show this on a small file, the call was given a budget far too short to finish. The count is withheld.</figcaption></figure>
+  <figure class="ex" data-ex="time_limit_resume" data-keys="search,count,count_is_exact,explanation,scan"><figcaption>The same call again with the cursor. It finishes the file and the exact count is now available.</figcaption></figure>
+
+  <div class="prose">
+    <h3>Progress and cancellation</h3>
+    <p>While a scan runs, the server sends MCP progress notifications to clients that ask for them. Each carries bytes scanned, the total, and a line of text such as:</p>
+  </div>
+  <div class="callout">
+    <p><code>scanning: 1,204 of 2,061 MB, 2 match(es) so far, 3s of 120s allowed</code></p>
+    <p><code>queued: waiting for a free scan slot (at most 2 scans run at once)</code></p>
+  </div>
+  <div class="prose">
+    <p>Only a limited number of scans run at the same time. Others wait their turn, and waiting does not use up their time budget.</p>
+    <p>A client can cancel a running call. The scan stops within milliseconds and its slot is freed once it has really stopped.</p>
+  </div>
+  <div class="callout warn">
+    <p><strong>Cancelled calls return nothing.</strong> The MCP protocol does not deliver a response to a request the client has cancelled. To get partial results back from a long scan, set <code>max_scan_seconds</code> instead. The response then arrives marked incomplete, with the matches found so far and a cursor.</p>
+  </div>
+
+  <div class="prose"><h3>The limits, and their defaults</h3><p>All of these are set in the server's configuration file.</p></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Setting</th><th>Default</th><th>What it bounds</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">max_rows_per_response</td><td class="num">25</td><td>Matching rows returned by one call.</td></tr>
+      <tr><td class="mono">max_output_bytes</td><td class="num">60,000</td><td>The size of any tool response.</td></tr>
+      <tr><td class="mono">max_cell_chars</td><td class="num">2,000</td><td>Length of one returned cell before it is cut and flagged.</td></tr>
+      <tr><td class="mono">max_sample_rows</td><td class="num">10</td><td>Sample rows from <code>inspect_csv_headers</code>.</td></tr>
+      <tr><td class="mono">max_files_per_listing</td><td class="num">200</td><td>Files returned by one <code>list_csv_files</code> call.</td></tr>
+      <tr><td class="mono">max_concurrent_scans</td><td class="num">2</td><td>Scans running at once.</td></tr>
+      <tr><td class="mono">max_scan_seconds</td><td class="num">120</td><td>Time one scan may take.</td></tr>
+      <tr><td class="mono">max_record_bytes</td><td class="num">4 MiB</td><td>The longest single CSV record accepted. A longer one usually means an unclosed quote.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ LEVEL 5 -->
+<section id="compare">
+  <div class="sec-head">
+    <p class="level">Level 5</p>
+    <h2>Compare one security across two files</h2>
+    <p>Most investigations end with “it was this here and that there”. The ninth tool does both lookups and the comparison in one call.</p>
+  </div>
+
+  <article class="tool" id="tool-compare-security-records">
+    <div class="tool-head">
+      <p class="label">Tool 9 of 9</p>
+      <h3>compare_security_records</h3>
+      <p>Finds a security in two files, reports whether it is present in each, and lists which fields changed and which did not.</p>
+    </div>
+    <div class="tool-two">
+      <div><h4>Use it when</h4><p>Comparing two runs of the same folder, or the files either side of a step.</p></div>
+      <div><h4>What it will not do</h4><p>Guess. If it cannot tell which record pairs with which, it says so and compares nothing.</p></div>
+    </div>
+    <div class="block"><h4>Parameters</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th></th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">folder_a, filename_a<br>folder_b, filename_b</td><td><span class="req">required</span></td><td>The two files. File A is usually the earlier or upstream one.</td></tr>
+          <tr><td class="mono">identifier</td><td><span class="req">required</span></td><td>The value to find in file A, and in file B unless <code>identifier_b</code> is given.</td></tr>
+          <tr><td class="mono">identifier_column_a</td><td><span class="req">required</span></td><td>Identifier column in file A.</td></tr>
+          <tr><td class="mono">identifier_column_b</td><td><span class="opt">optional</span></td><td>Identifier column in file B when it has a different name.</td></tr>
+          <tr><td class="mono">identifier_b</td><td><span class="opt">optional</span></td><td>A different value to find in file B, for when the files use different identifier types.</td></tr>
+          <tr><td class="mono">compare_columns</td><td><span class="opt">optional</span></td><td>Columns to compare, by their file A names. Leave out to compare every column the files share.</td></tr>
+          <tr><td class="mono">column_mapping</td><td><span class="opt">optional</span></td><td>File A column name to file B column name, for renamed columns. A target may be a name or <code>#N</code>.</td></tr>
+          <tr><td class="mono">match_keys</td><td><span class="opt">optional</span></td><td>File A columns that pair up records when a file has several for the security. Up to 10.</td></tr>
+          <tr><td class="mono">max_scan_seconds</td><td><span class="opt">optional</span></td><td>One time budget shared by both scans.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="block">
+      <h4>Step 1. Two runs of the same folder</h4>
+      <p class="note-p">The columns have the same names, and each file has one record for the security, so nothing more is needed.</p>
+      <figure class="ex" data-ex="compare_runs" data-keys="comparison_status,explanation,presence,comparisons"><figcaption>Larkspur in the 18:30 and 21:15 golden files. One field differs.</figcaption></figure>
+    </div>
+
+    <div class="block">
+      <h4>Step 2. Either side of a step, with renamed columns</h4>
+      <p class="note-p">The custodian file calls the identifier <code>SecurityId</code>; the enriched file calls it <code>sedol</code>. <code>column_mapping</code> covers the other renamed columns. But two portfolios hold Halvorsen, so each file has two records.</p>
+      <figure class="ex" data-ex="compare_ambiguous" data-keys="comparison_status,explanation,columns_that_differ_between_matches,records_in_file_a,records_in_file_b"><figcaption>Two records each side and no way given to pair them. The tool compares nothing and shows which columns tell the records apart.</figcaption></figure>
+    </div>
+
+    <div class="block">
+      <h4>Step 3. Add match keys</h4>
+      <p class="note-p">The response above suggested <code>PortfolioCode</code>. Passing it as a match key pairs the records.</p>
+      <figure class="ex" data-ex="compare_keys" data-keys="comparison_status,explanation,comparisons"><figcaption>Now each portfolio's record is compared with its counterpart.</figcaption></figure>
+    </div>
+
+    <div class="block">
+      <h4>Step 4. Present on one side only</h4>
+      <figure class="ex" data-ex="compare_one_side" data-keys="comparison_status,explanation,presence,records_in_file_a"><figcaption>Corbel Mining in the vendor file and in the normalised file after it. This is how a dropped security looks.</figcaption></figure>
+    </div>
+
+    <ul class="notes">
+      <li>Values are compared as exact text. A difference that is only formatting is still listed under <code>changed</code>, with a <code>note</code> such as “numerically equal; the text formatting differs”, “equal after trimming whitespace” or “equal ignoring letter case”.</li>
+      <li>Columns are paired by identical name unless <code>column_mapping</code> says otherwise. A name that is repeated in a header is never paired automatically.</li>
+      <li>Without <code>compare_columns</code>, the response lists the columns found in only one file under <code>columns_not_compared</code>.</li>
+      <li>Each file's <code>presence</code> has its own outcome, with the same three values as a search.</li>
+    </ul>
+  </article>
+
+  <div class="prose"><h3>The comparison statuses</h3></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>comparison_status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip found">compared</span></td><td>Every record was paired and compared.</td></tr>
+      <tr><td><span class="chip info">partially_compared</span></td><td>Some pairs were compared. Others had no counterpart or an ambiguous key, and are listed.</td></tr>
+      <tr><td><span class="chip unsure">ambiguous_alignment</span></td><td>Records could not be paired. Nothing was compared. Add or change <code>match_keys</code>.</td></tr>
+      <tr><td><span class="chip info">present_in_one_file_only</span></td><td>Complete scans found the security in one file and not the other.</td></tr>
+      <tr><td><span class="chip absent">absent_from_both</span></td><td>Complete scans found it in neither file.</td></tr>
+      <tr><td><span class="chip unsure">inconclusive</span></td><td>At least one file was not fully or reliably scanned. Nothing was compared.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ LEVEL 6 -->
+<section id="trouble">
+  <div class="sec-head">
+    <p class="level">Level 6</p>
+    <h2>When the file itself is the problem</h2>
+    <p>Real exports go wrong in ordinary ways. A tool that read a broken file as if it were fine would report securities as absent when they are there. CSV-o-Matic refuses to do that. It explains what is wrong and gives no verdict.</p>
+  </div>
+
+  <div class="prose"><h3>Requests that cannot be carried out</h3><p>A mistake in the request comes back as a structured error with a suggestion, and the request echoed. For search tools the outcome is <code>inconclusive</code>, because no search took place.</p></div>
+  <figure class="ex" data-ex="err_column" data-keys="outcome,explanation,error"><figcaption>Column names are exact, including case. The error names the column that was probably meant.</figcaption></figure>
+  <figure class="ex" data-ex="err_file" data-keys="outcome,error"><figcaption>A filename that is one digit out.</figcaption></figure>
+  <figure class="ex" data-ex="err_folder" data-keys="error"><figcaption>A folder that no process map describes cannot be read, whether or not it exists on disk.</figcaption></figure>
+
+  <div class="prose"><h3>Files that cannot be trusted</h3><p>For these three examples, copies of the 13 November custodian file were damaged in the ways named.</p></div>
+  <figure class="ex" data-ex="bad_utf16" data-keys="outcome,error"><figcaption>The file was saved as UTF-16, as a spreadsheet's “Unicode text” export does. It is refused outright.</figcaption></figure>
+  <figure class="ex" data-ex="bad_delimiter" data-keys="outcome,explanation,warnings,search"><figcaption>The file uses semicolons but the folder is declared as comma-separated. The whole header reads as one column, which the server notices.</figcaption></figure>
+  <figure class="ex" data-ex="bad_quote" data-keys="outcome,more_matches,results_are_partial,explanation,warnings"><figcaption>A quote is opened on one row and never closed, so the rest of the file is swallowed into one field. The two matches before it are returned, marked partial.</figcaption></figure>
+
+  <div class="prose"><h3>What each problem produces</h3></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Situation</th><th>What you get</th></tr></thead>
+    <tbody>
+      <tr><td>UTF-16 or UTF-32 text, or compressed data under a <code>.csv</code> name</td><td>Error <code>unsupported_encoding</code>. Nothing can be concluded.</td></tr>
+      <tr><td>A file that is not <code>.csv</code>, such as <code>.csv.gz</code></td><td>Error <code>not_a_csv_file</code>.</td></tr>
+      <tr><td>A link or special file in a mapped folder</td><td>Not listed. Reading it gives <code>file_unreadable</code>. Links are never followed.</td></tr>
+      <tr><td>Wrong delimiter declared for the folder</td><td>A warning, and <code>inconclusive</code> in place of absent.</td></tr>
+      <tr><td>Wrong encoding declared, and the value has non-ASCII characters</td><td>A warning that the value's bytes appear under another encoding, and <code>inconclusive</code>. Plain ASCII values are unaffected.</td></tr>
+      <tr><td>Bytes that are invalid in the declared encoding, inside a returned row</td><td>The row is returned with the replacement character, and a warning.</td></tr>
+      <tr><td>An unclosed quote in a data row</td><td>Matches before it are returned as partial. A count is withheld. Hidden rows show up as a near miss.</td></tr>
+      <tr><td>An unclosed quote in the header row</td><td>Error <code>parse_error</code> for the whole file.</td></tr>
+      <tr><td>One record longer than <code>max_record_bytes</code></td><td>Error <code>parse_error</code> at that record. Matches found before it are returned as partial.</td></tr>
+      <tr><td>No header row</td><td>The first row is read as column names. If the value searched for is in that row, a warning is given and the result is not final.</td></tr>
+      <tr><td>The file changes while it is being read</td><td>A warning, <code>inconclusive</code> in place of absent, and no cursor.</td></tr>
+      <tr><td>Two process maps declare different formats for one folder</td><td>Error <code>process_map_conflict</code> until the maps agree.</td></tr>
+      <tr><td>Old-style or mixed line endings</td><td>Read correctly. A record ends at LF, CRLF or a bare CR.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ CASES -->
+<section id="cases">
+  <div class="sec-head">
+    <p class="level">Practice</p>
+    <h2>Two investigations, from question to answer</h2>
+    <p>Each step shows what the model wanted to know, the call it made, and what the real response told it.</p>
+  </div>
+
+  <div class="case" id="case-a">
+    <h3 class="sub">Case A. The missing position</h3>
+    <p class="case-report">“Portfolio PF003 holds Halvorsen Aerospace according to the custodian on 13 November 2026, but it is missing from the client holdings file for that date. Why?”</p>
+    <ol class="steps">
+      <li><div class="step-body">
+        <h4>Learn the route</h4>
+        <p class="think">Which steps lie between the custodian file and the client report, and what does each one drop?</p>
+        <figure class="ex" data-ex="pm_eod" data-keys="process.steps"></figure>
+        <p class="learn">Custodian positions go through <code>enrich</code>, then branch to <code>client_report</code>. The enrich step is an inner join on SEDOL to the golden master and drops anything unmatched. The report step only excludes portfolios starting with <code>INT</code>.</p>
+      </div></li>
+      <li><div class="step-body">
+        <h4>Confirm the symptom</h4>
+        <p class="think">Is PF003 really absent from the client file?</p>
+        <figure class="ex" data-ex="inv_client_pf003" data-keys="outcome,explanation"></figure>
+        <p class="learn">Yes. A complete scan, no match in any column, and no near miss.</p>
+      </div></li>
+      <li><div class="step-body">
+        <h4>See what the custodian sent</h4>
+        <p class="think">What does PF003's row look like at the start of the process?</p>
+        <figure class="ex" data-ex="inv_custodian_pf003" data-keys="outcome,matches"></figure>
+        <p class="learn">One row: 900 units of <code>SecurityId</code> <code>417382</code>. The quantity is not zero, so the zero-quantity rule does not apply.</p>
+      </div></li>
+      <li><div class="step-body">
+        <h4>Find where it dropped out</h4>
+        <p class="think">Did the position survive the enrich step?</p>
+        <figure class="ex" data-ex="count_zero" data-keys="outcome,count,explanation"></figure>
+        <p class="learn">No. PF003 has zero rows in the enriched file. The position was lost at <code>enrich</code>, before the report step ever saw it.</p>
+      </div></li>
+      <li><div class="step-body">
+        <h4>Ask why the join failed</h4>
+        <p class="think">Is <code>417382</code> in the golden master that the 20:00 enrich run read?</p>
+        <figure class="ex" data-ex="inv_gold_1830_lost_zero" data-keys="outcome,explanation,near_misses"></figure>
+        <p class="learn">It is not there. But one value contains it: <code>0417382</code>, in the same column.</p>
+      </div></li>
+      <li><div class="step-body">
+        <h4>Identify the near miss</h4>
+        <p class="think">Which security is <code>0417382</code>?</p>
+        <figure class="ex" data-ex="inv_gold_1830_match" data-keys="outcome,matches"></figure>
+        <p class="learn">Halvorsen Aerospace PLC.</p>
+      </div></li>
+    </ol>
+    <div class="verdict">
+      <h4>Conclusion</h4>
+      <p>The custodian file carries Halvorsen's SEDOL for PF003 without its leading zero. The enrich step joins on SEDOL as text, found no match, and dropped the position. The client report is correct for the input it received. The fault is upstream, in the custodian file or whatever produced it.</p>
+      <p>One thing is inferred, not shown: no file records which golden master a run read. The 18:30 file is assumed because the 21:15 one did not exist when enrich started at 20:00.</p>
+    </div>
+  </div>
+
+  <div class="case" id="case-b">
+    <h3 class="sub">Case B. Two prices for one security</h3>
+    <p class="case-report">“People are quoting two different prices for Larkspur Holdings for 13 November 2026. Why are there two, and which one did the positions use?”</p>
+    <ol class="steps">
+      <li><div class="step-body">
+        <h4>Look for more than one run</h4>
+        <p class="think">How many golden files exist for that business date?</p>
+        <figure class="ex" data-ex="files_golden" data-keys="total_matching_files,files"></figure>
+        <p class="learn">Two: one run at 18:30 and one at 21:15. The process map says the latest run supersedes the earlier one.</p>
+      </div></li>
+      <li><div class="step-body">
+        <h4>Compare the two runs</h4>
+        <p class="think">What differs for Larkspur between them?</p>
+        <figure class="ex" data-ex="compare_runs" data-keys="comparison_status,comparisons"></figure>
+        <p class="learn">Only <code>close_price</code>: 452.1100 in the first run, 455.0000 in the second. Six other fields are unchanged.</p>
+      </div></li>
+      <li><div class="step-body">
+        <h4>Trace the change upstream</h4>
+        <p class="think">Did the build change the price, or did its input change?</p>
+        <figure class="ex" data-ex="files_vendor" data-keys="total_matching_files,files"></figure>
+        <figure class="ex" data-ex="inv_vendor_1802_larkspur" data-keys="file,matches"></figure>
+        <figure class="ex" data-ex="inv_vendor_2047_larkspur" data-keys="file,matches"></figure>
+        <p class="learn">The vendor delivered twice, at 18:02 and 20:47. The first delivery has 452.11000 and the second 455.00000. The change came from the vendor.</p>
+      </div></li>
+      <li><div class="step-body">
+        <h4>Check what the positions used</h4>
+        <p class="think">Which price is in the enriched positions?</p>
+        <figure class="ex" data-ex="inv_enriched_larkspur" data-keys="file,matches"></figure>
+        <p class="learn">452.1100. PF001 holds 40 units, valued at 18,084.40. The only enriched file ran at 20:00, before the corrected master existed.</p>
+      </div></li>
+    </ol>
+    <div class="verdict">
+      <h4>Conclusion</h4>
+      <p>The vendor redelivered the 13 November file at 20:47 with Larkspur's price corrected from 452.11 to 455.00. The security master was rebuilt at 21:15 and now shows 455.00. Positions were built at 20:00 from the earlier master and were not rerun, so they are valued at 452.11. Both prices are real: one is current, the other is what the published positions used.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ REFERENCE -->
+<section id="reference">
+  <div class="sec-head">
+    <p class="level">Lookup</p>
+    <h2>Quick reference</h2>
+  </div>
+
+  <div class="prose"><h3>The nine tools</h3></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Tool</th><th>Needs</th><th>Gives</th></tr></thead>
+    <tbody>
+      <tr><td class="mono"><a href="#tool-get-process-map">get_process_map</a></td><td>Nothing, or a process</td><td>List of processes, or one full map, or one step.</td></tr>
+      <tr><td class="mono"><a href="#tool-list-folders">list_folders</a></td><td>Nothing, or a process</td><td>Folders with descriptions and the steps that use them.</td></tr>
+      <tr><td class="mono"><a href="#tool-list-csv-files">list_csv_files</a></td><td>A folder</td><td>Files with size, modification time and filename dates.</td></tr>
+      <tr><td class="mono"><a href="#tool-inspect-csv-headers">inspect_csv_headers</a></td><td>A file</td><td>Column names in order, and optionally a few leading rows.</td></tr>
+      <tr><td class="mono"><a href="#tool-search-column-names">search_column_names</a></td><td>A file and a term</td><td>Columns whose names contain the term.</td></tr>
+      <tr><td class="mono"><a href="#tool-find-security-in-file">find_security_in_file</a></td><td>A file, a value, a column</td><td>Rows where that column equals the value.</td></tr>
+      <tr><td class="mono"><a href="#tool-search-across-columns">search_across_columns</a></td><td>A file and a value</td><td>Rows where any column equals the value, with the columns named.</td></tr>
+      <tr><td class="mono"><a href="#tool-count-matching-rows">count_matching_rows</a></td><td>A file, a value, a column</td><td>The exact number of matching rows.</td></tr>
+      <tr><td class="mono"><a href="#tool-compare-security-records">compare_security_records</a></td><td>Two files, a value, a column</td><td>Presence in each file, and changed and unchanged fields.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="prose"><h3>Fields in a search result</h3></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">outcome</td><td><code>match_found</code>, <code>confirmed_absent</code> or <code>inconclusive</code>.</td></tr>
+      <tr><td class="mono">explanation</td><td>The result in one or two plain sentences. Read this first.</td></tr>
+      <tr><td class="mono">file, search</td><td>The file read and the search carried out, echoed back.</td></tr>
+      <tr><td class="mono">scan.complete</td><td>True when the scan reached the end of the file.</td></tr>
+      <tr><td class="mono">scan.stop_reason</td><td><code>end_of_file</code>, <code>row_limit</code>, <code>output_size_limit</code>, <code>time_limit</code>, <code>cancelled</code> or <code>error</code>.</td></tr>
+      <tr><td class="mono">scan.records_after_header</td><td>Records in the file after the header. Present on complete scans. Blank lines count.</td></tr>
+      <tr><td class="mono">matches</td><td>The rows: <code>record_number</code>, <code>byte_offset</code> and <code>values</code> by column label.</td></tr>
+      <tr><td class="mono">more_matches</td><td><code>none</code>, <code>yes</code> or <code>unknown</code>.</td></tr>
+      <tr><td class="mono">results_are_partial</td><td>True unless every match has been returned.</td></tr>
+      <tr><td class="mono">next_cursor</td><td>Pass it back to continue. <code>null</code> when there is nothing to continue.</td></tr>
+      <tr><td class="mono">near_misses</td><td>Close values that are not matches. Present only when some were seen.</td></tr>
+      <tr><td class="mono">warnings</td><td>Problems with the file itself. Any warning here means a missing value is not proven absent.</td></tr>
+      <tr><td class="mono">error</td><td>Why a request could not be carried out, or why a scan stopped part-way.</td></tr>
+      <tr><td class="mono">count, count_is_exact</td><td>From <code>count_matching_rows</code>. The count is <code>null</code> unless exact.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="prose">
+    <h3>Rules of thumb for the model</h3>
+    <ul>
+      <li>Start with <code>get_process_map</code>. The filter rules usually name the cause before any file is opened.</li>
+      <li>List the files before choosing one. Two files for one business date changes the question.</li>
+      <li>Take identifier column names from the process map or the headers. They are exact, including case.</li>
+      <li>Treat <code>inconclusive</code> as “not yet known”. Continue with the cursor or fix the cause.</li>
+      <li>When a search is absent, read <code>near_misses</code> before moving on.</li>
+      <li>Say what is inferred. No file records which upstream file a run read.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>CSV-o-Matic field guide. All names, identifiers and figures in the examples are invented. Example responses were produced by the server from that invented data and are refreshed with <code>python scripts/build_guide.py</code>.</p>
+</footer>
+
+</main>
+</div>
+
+<!--EXAMPLES:START-->
+<script type="application/json" id="examples">{"pm_list":{"tool":"get_process_map","arguments":{},"response":{"tool":"get_process_map","processes":[{"id":"eod_positions","name":"End-of-Day Positions","description":"Enriches custodian positions with the golden security master and feeds reporting and risk."},{"id":"security_master","name":"Security Master Build","description":"Builds the daily golden security master from the vendor reference feed."}],"next_step":"Call get_process_map with a process id or name for the full map."},"is_error":false},"pm_security_master":{"tool":"get_process_map","arguments":{"process":"security_master"},"response":{"tool":"get_process_map","process":{"id":"security_master","name":"Security Master Build","description":"Builds the daily golden security master from the vendor reference feed.","purpose":"Takes the vendor's end-of-day reference data file, standardises identifiers and field names, enriches equities and fixed income on separate branches, and publishes one golden security master that every downstream process (positions, pricing, reporting) reads.\n","schedule":"Weekdays. Vendor file lands around 18:00 UTC; golden file is published by 19:30 UTC.","run_semantics":"Every run writes new files; nothing is overwritten. The business date in a filename is the as-of date of the data. The run timestamp is the UTC time the step started. Several files with the same business date and different run timestamps are retries or reruns of that date: the LATEST run timestamp is the one downstream steps consume, earlier ones are superseded. A backfill reprocesses an old business date, so its run timestamp is days or weeks later than its business date in every folder; in the normalised folder backfilled files also carry the suffix _BF. Filesystem modification time is not reliable for any of this: files are copied between shares.\n","folders":[{"id":"vendor_raw","path":"security_master/01_vendor_raw","description":"Vendor reference feed exactly as delivered. One row per listing.","filename_convention":{"pattern":"vendor_ref_{business_date}_{run_timestamp}.csv","regex":"^vendor_ref_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"As-of date of the vendor data","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the vendor delivery was received","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date","notes":"A second file for the same business_date is a vendor redelivery (correction)."},"identifier_columns":[{"column":"ISIN","identifier_type":"ISIN"},{"column":"SEDOL","identifier_type":"SEDOL","notes":"7 characters, may start with zeroes"},{"column":"VendorId","identifier_type":"vendor internal id"}],"record_key_columns":["ISIN","ExchangeCode"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"normalised","path":"security_master/02_normalised","description":"Vendor data with standardised column names and identifiers. One row per listing.","filename_convention":{"pattern":"sm_normalised_{business_date}_{run_timestamp}[_BF].csv","regex":"^sm_normalised_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})(?P<backfill>_BF)?\\.csv$","tokens":{"business_date":{"meaning":"As-of date of the data","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the normalise step started","format":"%Y%m%dT%H%M%S","timezone":"UTC"},"backfill":{"meaning":"Present (_BF) when the file was produced by a backfill"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"isin","identifier_type":"ISIN"},{"column":"sedol","identifier_type":"SEDOL"}],"record_key_columns":["isin","exchange_code"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"equity_enriched","path":"security_master/03a_equity_enriched","description":"Equities only, with sector classification added.","filename_convention":{"pattern":"sm_equity_{business_date}_{run_timestamp}.csv","regex":"^sm_equity_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"As-of date of the data","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the equity enrichment step started","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"isin","identifier_type":"ISIN"}],"record_key_columns":["isin","exchange_code"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"fixed_income_enriched","path":"security_master/03b_fixed_income_enriched","description":"Bonds only, with maturity and coupon validated.","filename_convention":{"pattern":"sm_fi_{business_date}_{run_timestamp}.csv","regex":"^sm_fi_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"As-of date of the data","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the fixed income enrichment step started","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"isin","identifier_type":"ISIN"}],"record_key_columns":["isin","exchange_code"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"golden","path":"security_master/04_golden","description":"Published golden security master. One row per security (primary listing only).","filename_convention":{"pattern":"security_master_{business_date}_{run_timestamp}.csv","regex":"^security_master_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"As-of date of the data","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the publish step started","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"isin","identifier_type":"ISIN"},{"column":"sedol","identifier_type":"SEDOL"}],"record_key_columns":["isin"],"csv_format":{"delimiter":",","encoding":"utf-8"}}],"steps":[{"id":"ingest","name":"Receive vendor file","description":"Lands the vendor delivery unchanged in vendor_raw.","writes":["vendor_raw"],"downstream":["normalise"]},{"id":"normalise","name":"Normalise","description":"Renames columns, cleans identifiers and drops rows that cannot be identified.","reads":["vendor_raw"],"writes":["normalised"],"upstream":["ingest"],"downstream":["enrich_equity","enrich_fixed_income"],"field_mappings":[{"from_folder":"vendor_raw","from_column":"ISIN","to_folder":"normalised","to_column":"isin","rule":"Trimmed and upper-cased"},{"from_folder":"vendor_raw","from_column":"SEDOL","to_folder":"normalised","to_column":"sedol","rule":"Kept as text; leading zeroes preserved"},{"from_folder":"vendor_raw","from_column":"SecurityName","to_folder":"normalised","to_column":"name"},{"from_folder":"vendor_raw","from_column":"AssetType","to_folder":"normalised","to_column":"asset_class","rule":"EQ -> EQUITY, BD -> BOND, anything else -> OTHER"},{"from_folder":"vendor_raw","from_column":"ExchangeCode","to_folder":"normalised","to_column":"exchange_code"},{"from_folder":"vendor_raw","from_column":"ClosePrice","to_folder":"normalised","to_column":"close_price","rule":"Rounded to 4 decimal places"},{"from_folder":"vendor_raw","from_column":"Ccy","to_folder":"normalised","to_column":"currency"},{"from_folder":"vendor_raw","from_column":"IsPrimary","to_folder":"normalised","to_column":"is_primary"},{"from_folder":"vendor_raw","from_column":"MaturityDate","to_folder":"normalised","to_column":"maturity_date"},{"from_folder":"vendor_raw","from_column":"Coupon","to_folder":"normalised","to_column":"coupon"}],"transformation_rules":["Reads only the latest run_timestamp of vendor_raw for the business date."],"filter_rules":["Rows with an empty ISIN are dropped.","Rows where Status is 'DELISTED' are dropped."]},{"id":"enrich_equity","name":"Enrich equities","description":"Adds sector classification to equities.","reads":["normalised"],"writes":["equity_enriched"],"upstream":["normalise"],"downstream":["publish"],"branch_condition":"Takes rows where asset_class = EQUITY.","filter_rules":["Rows with asset_class other than EQUITY do not enter this branch."]},{"id":"enrich_fixed_income","name":"Enrich fixed income","description":"Validates maturity and coupon for bonds.","reads":["normalised"],"writes":["fixed_income_enriched"],"upstream":["normalise"],"downstream":["publish"],"branch_condition":"Takes rows where asset_class = BOND.","filter_rules":["Rows with asset_class other than BOND do not enter this branch.","Bonds whose maturity_date is before the business date are dropped."]},{"id":"publish","name":"Publish golden master","description":"Merges both branches and keeps the primary listing of each security.","reads":["equity_enriched","fixed_income_enriched"],"writes":["golden"],"upstream":["enrich_equity","enrich_fixed_income"],"transformation_rules":["Where a security has several listings, only the row with is_primary = Y is kept."],"filter_rules":["Nothing is filtered here for asset class, but note: asset_class OTHER enters neither branch, so such securities are already missing from both enriched folders and never reach the golden master.","Securities with no primary listing are dropped."]}]}},"is_error":false},"pm_eod":{"tool":"get_process_map","arguments":{"process":"eod_positions"},"response":{"tool":"get_process_map","process":{"id":"eod_positions","name":"End-of-Day Positions","description":"Enriches custodian positions with the golden security master and feeds reporting and risk.","purpose":"Loads custodian position files, joins them to the golden security master to add security attributes and market value, then branches into a client reporting extract and a risk feed.\n","schedule":"Weekdays, after the Security Master Build publishes (about 20:00 UTC).","run_semantics":"The business date in a filename is the position date. The run timestamp is the UTC start time of the step. A rerun for the same position date produces a new file with a later run timestamp and supersedes the earlier one. Custodian late deliveries cause same-day reruns. The join always uses the golden security master with the same business date and the latest run timestamp that existed when the step started - so a security added by a later security master rerun will be missing from positions produced before that rerun.\n","folders":[{"id":"custodian_raw","path":"positions/01_custodian_raw","description":"Custodian position files as received. One row per portfolio and security.","filename_convention":{"pattern":"custodian_positions_{business_date}_{run_timestamp}.csv","regex":"^custodian_positions_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"Position date","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the custodian file was received","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"SecurityId","identifier_type":"SEDOL","notes":"SEDOL as text; leading zeroes are significant"}],"record_key_columns":["PortfolioCode","SecurityId"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"golden","path":"security_master/04_golden","description":"Golden security master published by the Security Master Build (read only by this process).","identifier_columns":[{"column":"isin","identifier_type":"ISIN"},{"column":"sedol","identifier_type":"SEDOL"}],"record_key_columns":["isin"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"enriched","path":"positions/02_enriched","description":"Positions joined to the security master, with market value. One row per portfolio and security.","filename_convention":{"pattern":"positions_enriched_{business_date}_{run_timestamp}.csv","regex":"^positions_enriched_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"Position date","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the enrich step started","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"isin","identifier_type":"ISIN"},{"column":"sedol","identifier_type":"SEDOL"}],"record_key_columns":["portfolio_code","isin"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"client_report","path":"positions/03a_client_report","description":"Client reporting extract.","filename_convention":{"pattern":"client_holdings_{business_date}_{run_timestamp}.csv","regex":"^client_holdings_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"Position date","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the report extract step started","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"ISIN","identifier_type":"ISIN"}],"record_key_columns":["Portfolio","ISIN"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"risk_feed","path":"positions/03b_risk_feed","description":"Position feed for the risk system.","filename_convention":{"pattern":"risk_positions_{business_date}_{run_timestamp}.csv","regex":"^risk_positions_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"Position date","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the risk feed step started","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"isin","identifier_type":"ISIN"}],"record_key_columns":["portfolio_code","isin"],"csv_format":{"delimiter":",","encoding":"utf-8"}}],"steps":[{"id":"load_custodian","name":"Load custodian positions","description":"Lands the custodian file unchanged.","writes":["custodian_raw"],"downstream":["enrich"]},{"id":"enrich","name":"Enrich positions","description":"Joins positions to the golden security master on SEDOL and computes market value.","reads":["custodian_raw","golden"],"writes":["enriched"],"upstream":["load_custodian"],"downstream":["client_report","risk_feed"],"field_mappings":[{"from_folder":"custodian_raw","from_column":"PortfolioCode","to_folder":"enriched","to_column":"portfolio_code"},{"from_folder":"custodian_raw","from_column":"SecurityId","to_folder":"enriched","to_column":"sedol","rule":"Join key to golden.sedol"},{"from_folder":"custodian_raw","from_column":"Quantity","to_folder":"enriched","to_column":"quantity"},{"from_folder":"golden","from_column":"isin","to_folder":"enriched","to_column":"isin"},{"from_folder":"golden","from_column":"name","to_folder":"enriched","to_column":"name"},{"from_folder":"golden","from_column":"close_price","to_folder":"enriched","to_column":"price"}],"transformation_rules":["market_value = quantity * price, rounded to 2 decimal places."],"filter_rules":["Inner join: positions whose SecurityId has no matching sedol in the golden master are dropped.","Positions with Quantity = 0 are dropped."]},{"id":"client_report","name":"Client reporting extract","description":"Produces the holdings extract sent to client reporting.","reads":["enriched"],"writes":["client_report"],"upstream":["enrich"],"branch_condition":"All enriched positions except internal portfolios.","field_mappings":[{"from_folder":"enriched","from_column":"portfolio_code","to_folder":"client_report","to_column":"Portfolio"},{"from_folder":"enriched","from_column":"isin","to_folder":"client_report","to_column":"ISIN"},{"from_folder":"enriched","from_column":"market_value","to_folder":"client_report","to_column":"MarketValue"}],"filter_rules":["Portfolios whose code starts with 'INT' are excluded."]},{"id":"risk_feed","name":"Risk feed","description":"Sends all enriched positions to the risk system.","reads":["enriched"],"writes":["risk_feed"],"upstream":["enrich"],"branch_condition":"All enriched positions."}]}},"is_error":false},"pm_step":{"tool":"get_process_map","arguments":{"process":"eod_positions","step_id":"enrich"},"response":{"tool":"get_process_map","process_id":"eod_positions","process_name":"End-of-Day Positions","step":{"id":"enrich","name":"Enrich positions","description":"Joins positions to the golden security master on SEDOL and computes market value.","reads":["custodian_raw","golden"],"writes":["enriched"],"upstream":["load_custodian"],"downstream":["client_report","risk_feed"],"field_mappings":[{"from_folder":"custodian_raw","from_column":"PortfolioCode","to_folder":"enriched","to_column":"portfolio_code"},{"from_folder":"custodian_raw","from_column":"SecurityId","to_folder":"enriched","to_column":"sedol","rule":"Join key to golden.sedol"},{"from_folder":"custodian_raw","from_column":"Quantity","to_folder":"enriched","to_column":"quantity"},{"from_folder":"golden","from_column":"isin","to_folder":"enriched","to_column":"isin"},{"from_folder":"golden","from_column":"name","to_folder":"enriched","to_column":"name"},{"from_folder":"golden","from_column":"close_price","to_folder":"enriched","to_column":"price"}],"transformation_rules":["market_value = quantity * price, rounded to 2 decimal places."],"filter_rules":["Inner join: positions whose SecurityId has no matching sedol in the golden master are dropped.","Positions with Quantity = 0 are dropped."]},"folders":[{"id":"custodian_raw","path":"positions/01_custodian_raw","description":"Custodian position files as received. One row per portfolio and security.","filename_convention":{"pattern":"custodian_positions_{business_date}_{run_timestamp}.csv","regex":"^custodian_positions_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"Position date","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the custodian file was received","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"SecurityId","identifier_type":"SEDOL","notes":"SEDOL as text; leading zeroes are significant"}],"record_key_columns":["PortfolioCode","SecurityId"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"golden","path":"security_master/04_golden","description":"Golden security master published by the Security Master Build (read only by this process).","identifier_columns":[{"column":"isin","identifier_type":"ISIN"},{"column":"sedol","identifier_type":"SEDOL"}],"record_key_columns":["isin"],"csv_format":{"delimiter":",","encoding":"utf-8"}},{"id":"enriched","path":"positions/02_enriched","description":"Positions joined to the security master, with market value. One row per portfolio and security.","filename_convention":{"pattern":"positions_enriched_{business_date}_{run_timestamp}.csv","regex":"^positions_enriched_(?P<business_date>\\d{8})_(?P<run_timestamp>\\d{8}T\\d{6})\\.csv$","tokens":{"business_date":{"meaning":"Position date","format":"%Y%m%d"},"run_timestamp":{"meaning":"When the enrich step started","format":"%Y%m%dT%H%M%S","timezone":"UTC"}},"default_date_token":"business_date"},"identifier_columns":[{"column":"isin","identifier_type":"ISIN"},{"column":"sedol","identifier_type":"SEDOL"}],"record_key_columns":["portfolio_code","isin"],"csv_format":{"delimiter":",","encoding":"utf-8"}}]},"is_error":false},"folders":{"tool":"list_folders","arguments":{"process":"eod_positions"},"response":{"tool":"list_folders","scope":"process 'eod_positions'","total_folders":5,"folders_returned":5,"folders":[{"folder":"positions/01_custodian_raw","description":"Custodian position files as received. One row per portfolio and security.","exists_on_disk":true,"used_by":[{"process_id":"eod_positions","folder_id":"custodian_raw","steps":[{"step_id":"load_custodian","step_name":"Load custodian positions","role":"writes"},{"step_id":"enrich","step_name":"Enrich positions","role":"reads"}]}],"filename_pattern":"custodian_positions_{business_date}_{run_timestamp}.csv","identifier_columns":[{"column":"SecurityId","identifier_type":"SEDOL"}]},{"folder":"positions/02_enriched","description":"Positions joined to the security master, with market value. One row per portfolio and security.","exists_on_disk":true,"used_by":[{"process_id":"eod_positions","folder_id":"enriched","steps":[{"step_id":"enrich","step_name":"Enrich positions","role":"writes"},{"step_id":"client_report","step_name":"Client reporting extract","role":"reads"},{"step_id":"risk_feed","step_name":"Risk feed","role":"reads"}]}],"filename_pattern":"positions_enriched_{business_date}_{run_timestamp}.csv","identifier_columns":[{"column":"isin","identifier_type":"ISIN"},{"column":"sedol","identifier_type":"SEDOL"}]},{"folder":"positions/03a_client_report","description":"Client reporting extract.","exists_on_disk":true,"used_by":[{"process_id":"eod_positions","folder_id":"client_report","steps":[{"step_id":"client_report","step_name":"Client reporting extract","role":"writes"}]}],"filename_pattern":"client_holdings_{business_date}_{run_timestamp}.csv","identifier_columns":[{"column":"ISIN","identifier_type":"ISIN"}]},{"folder":"positions/03b_risk_feed","description":"Position feed for the risk system.","exists_on_disk":true,"used_by":[{"process_id":"eod_positions","folder_id":"risk_feed","steps":[{"step_id":"risk_feed","step_name":"Risk feed","role":"writes"}]}],"filename_pattern":"risk_positions_{business_date}_{run_timestamp}.csv","identifier_columns":[{"column":"isin","identifier_type":"ISIN"}]},{"folder":"security_master/04_golden","description":"Golden security master published by the Security Master Build (read only by this process).","exists_on_disk":true,"used_by":[{"process_id":"eod_positions","folder_id":"golden","steps":[{"step_id":"enrich","step_name":"Enrich positions","role":"reads"}]}],"identifier_columns":[{"column":"isin","identifier_type":"ISIN"},{"column":"sedol","identifier_type":"SEDOL"}]}],"truncated":false,"note":"Pass a folder's 'folder' value to list_csv_files. get_process_map has the rest: what each filename token means, record keys, field mappings and filter rules."},"is_error":false},"files_golden":{"tool":"list_csv_files","arguments":{"folder":"security_master/04_golden","date_from":"2026-11-13","date_to":"2026-11-13"},"response":{"tool":"list_csv_files","folder":"security_master/04_golden","filters":{"filename_contains":null,"date_from":"2026-11-13","date_to":"2026-11-13","date_field":"business_date"},"total_matching_files":2,"files_returned":2,"files":[{"filename":"security_master_20261113_20261113T211500.csv","size_bytes":151878,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-13","run_timestamp":"2026-11-13T21:15:00"},"matches_filename_convention":true},{"filename":"security_master_20261113_20261113T183000.csv","size_bytes":151806,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-13","run_timestamp":"2026-11-13T18:30:00"},"matches_filename_convention":true}],"truncated":false,"sorted_by":"filename, descending","time_fields":{"filesystem_modified_time":"When the file was last written on disk (UTC). Not a business date: copies, reruns and backfills change it.","filename_tokens":{"business_date":"As-of date of the data","run_timestamp":"When the publish step started"}},"filename_convention":{"pattern":"security_master_{business_date}_{run_timestamp}.csv"}},"is_error":false},"files_normalised":{"tool":"list_csv_files","arguments":{"folder":"security_master/02_normalised"},"response":{"tool":"list_csv_files","folder":"security_master/02_normalised","filters":{"filename_contains":null,"date_from":null,"date_to":null,"date_field":null},"total_matching_files":4,"files_returned":4,"files":[{"filename":"sm_normalised_20261113_20261113T211500.csv","size_bytes":143152,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-13","run_timestamp":"2026-11-13T21:15:00"},"matches_filename_convention":true},{"filename":"sm_normalised_20261113_20261113T183000.csv","size_bytes":143082,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-13","run_timestamp":"2026-11-13T18:30:00"},"matches_filename_convention":true},{"filename":"sm_normalised_20261112_20261112T183000.csv","size_bytes":143082,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-12","run_timestamp":"2026-11-12T18:30:00"},"matches_filename_convention":true},{"filename":"sm_normalised_20261102_20261113T220000_BF.csv","size_bytes":143082,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-02","run_timestamp":"2026-11-13T22:00:00","backfill":"_BF"},"matches_filename_convention":true}],"truncated":false,"sorted_by":"filename, descending","time_fields":{"filesystem_modified_time":"When the file was last written on disk (UTC). Not a business date: copies, reruns and backfills change it.","filename_tokens":{"business_date":"As-of date of the data","run_timestamp":"When the normalise step started","backfill":"Present (_BF) when the file was produced by a backfill"}},"filename_convention":{"pattern":"sm_normalised_{business_date}_{run_timestamp}[_BF].csv"}},"is_error":false},"files_vendor":{"tool":"list_csv_files","arguments":{"folder":"security_master/01_vendor_raw","date_from":"2026-11-13","date_to":"2026-11-13"},"response":{"tool":"list_csv_files","folder":"security_master/01_vendor_raw","filters":{"filename_contains":null,"date_from":"2026-11-13","date_to":"2026-11-13","date_field":"business_date"},"total_matching_files":2,"files_returned":2,"files":[{"filename":"vendor_ref_20261113_20261113T204700.csv","size_bytes":165397,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-13","run_timestamp":"2026-11-13T20:47:00"},"matches_filename_convention":true},{"filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-13","run_timestamp":"2026-11-13T18:02:00"},"matches_filename_convention":true}],"truncated":false,"sorted_by":"filename, descending","time_fields":{"filesystem_modified_time":"When the file was last written on disk (UTC). Not a business date: copies, reruns and backfills change it.","filename_tokens":{"business_date":"As-of date of the vendor data","run_timestamp":"When the vendor delivery was received"}},"filename_convention":{"pattern":"vendor_ref_{business_date}_{run_timestamp}.csv","notes":"A second file for the same business_date is a vendor redelivery (correction)."}},"is_error":false},"files_client":{"tool":"list_csv_files","arguments":{"folder":"positions/03a_client_report","date_from":"2026-11-13","date_to":"2026-11-13"},"response":{"tool":"list_csv_files","folder":"positions/03a_client_report","filters":{"filename_contains":null,"date_from":"2026-11-13","date_to":"2026-11-13","date_field":"business_date"},"total_matching_files":1,"files_returned":1,"files":[{"filename":"client_holdings_20261113_20261113T200000.csv","size_bytes":303,"filesystem_modified_time":"2026-11-14T02:10:00+00:00","filename_tokens":{"business_date":"2026-11-13","run_timestamp":"2026-11-13T20:00:00"},"matches_filename_convention":true}],"truncated":false,"sorted_by":"filename, descending","time_fields":{"filesystem_modified_time":"When the file was last written on disk (UTC). Not a business date: copies, reruns and backfills change it.","filename_tokens":{"business_date":"Position date","run_timestamp":"When the report extract step started"}},"filename_convention":{"pattern":"client_holdings_{business_date}_{run_timestamp}.csv"}},"is_error":false},"headers":{"tool":"inspect_csv_headers","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv"},"response":{"tool":"inspect_csv_headers","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"column_count":12,"columns":["VendorId","ISIN","SEDOL","SecurityName","AssetType","ExchangeCode","IsPrimary","Status","ClosePrice","Ccy","MaturityDate","Coupon"],"columns_truncated":false},"is_error":false},"headers_sample":{"tool":"inspect_csv_headers","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","sample_rows":2,"sample_columns":["ISIN","SEDOL","SecurityName","Status"]},"response":{"tool":"inspect_csv_headers","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"column_count":12,"columns":["VendorId","ISIN","SEDOL","SecurityName","AssetType","ExchangeCode","IsPrimary","Status","ClosePrice","Ccy","MaturityDate","Coupon"],"columns_truncated":false,"sample_rows":[{"record_number":2,"byte_offset":109,"values":{"ISIN":"GB0004173829","SEDOL":"0417382","SecurityName":"Halvorsen Aerospace PLC","Status":"ACTIVE"}},{"record_number":3,"byte_offset":195,"values":{"ISIN":"US5128471093","SEDOL":"2619045","SecurityName":"Larkspur Holdings, Inc.","Status":"ACTIVE"}}],"sample_note":"The first 2 data record(s) only: a layout sample, not evidence about any security."},"is_error":false},"column_search":{"tool":"search_column_names","arguments":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","term":"price"},"response":{"tool":"search_column_names","file":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","size_bytes":496,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"term":"price","match_type":"case-insensitive substring of the column name","column_count":8,"matching_column_count":1,"matching_columns":[{"column":"price","position":6}],"truncated":false},"is_error":false},"find_match":{"tool":"find_security_in_file","arguments":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","identifier":"0417382","identifier_column":"sedol"},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","size_bytes":151878,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"0417382","match_type":"exact: whole field value, case-sensitive, compared as text","column":"sedol","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":57,"stopped_at_byte":151878,"file_size_bytes":151878,"elapsed_seconds":0.02,"records_after_header":2005},"outcome":"match_found","matches_returned":1,"matches":[{"record_number":2,"byte_offset":57,"values":{"isin":"GB0004173829","sedol":"0417382","name":"Halvorsen Aerospace PLC","asset_class":"EQUITY","close_price":"1312.5000","currency":"GBX","sector":"Aerospace & Defence"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (1 in total).","next_cursor":null},"is_error":false},"find_lost_zero":{"tool":"find_security_in_file","arguments":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","identifier":"417382","identifier_column":"sedol"},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","size_bytes":151878,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"417382","match_type":"exact: whole field value, case-sensitive, compared as text","column":"sedol","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":57,"stopped_at_byte":151878,"file_size_bytes":151878,"elapsed_seconds":0.02,"records_after_header":2005},"outcome":"confirmed_absent","matches_returned":0,"matches":[],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: no record has '417382' as the exact value of column 'sedol'. Not exact matches, but worth checking: 1 value(s) contain it inside a longer value (see near_misses).","next_cursor":null,"near_misses":{"note":"Seen in the part of the file scanned. These are NOT exact matches and are not counted or returned as matches.","identifier_inside_a_longer_value":{"count":1,"examples":[{"record_number":2,"column":"sedol","value":"0417382"}]}}},"is_error":false},"find_columns":{"tool":"find_security_in_file","arguments":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","identifier":"PF002","identifier_column":"PortfolioCode","columns":["SecurityId","Quantity"]},"response":{"tool":"find_security_in_file","file":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","size_bytes":234,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"PF002","match_type":"exact: whole field value, case-sensitive, compared as text","column":"PortfolioCode","columns_returned":["SecurityId","Quantity"],"max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":49,"stopped_at_byte":234,"file_size_bytes":234,"elapsed_seconds":0.02,"records_after_header":8},"outcome":"match_found","matches_returned":2,"matches":[{"record_number":3,"byte_offset":73,"values":{"SecurityId":"0417382","Quantity":"250"}},{"record_number":8,"byte_offset":186,"values":{"SecurityId":"BF8QT61","Quantity":"200000"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (2 in total).","next_cursor":null},"is_error":false},"find_multiline":{"tool":"find_security_in_file","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","identifier":"XS2048815523","identifier_column":"ISIN","columns":["SecurityName","ClosePrice","MaturityDate"]},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"XS2048815523","match_type":"exact: whole field value, case-sensitive, compared as text","column":"ISIN","columns_returned":["SecurityName","ClosePrice","MaturityDate"],"max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":109,"stopped_at_byte":165317,"file_size_bytes":165317,"elapsed_seconds":0.02,"records_after_header":2009},"outcome":"match_found","matches_returned":1,"matches":[{"record_number":7,"byte_offset":525,"values":{"SecurityName":"Marlow Finance 4.5% 2031\n(guaranteed notes)","ClosePrice":"98.76543","MaturityDate":"2031-06-30"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (1 in total).","next_cursor":null},"is_error":false},"find_absent":{"tool":"find_security_in_file","arguments":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T183000.csv","identifier":"GB00BPNDL008","identifier_column":"isin"},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T183000.csv","size_bytes":151806,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"GB00BPNDL008","match_type":"exact: whole field value, case-sensitive, compared as text","column":"isin","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":57,"stopped_at_byte":151806,"file_size_bytes":151806,"elapsed_seconds":0.02,"records_after_header":2004},"outcome":"confirmed_absent","matches_returned":0,"matches":[],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: no record has 'GB00BPNDL008' as the exact value of column 'isin'. No near misses were seen either.","next_cursor":null},"is_error":false},"across":{"tool":"search_across_columns","arguments":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","identifier":"417382"},"response":{"tool":"search_across_columns","file":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","size_bytes":234,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"417382","match_type":"exact: whole field value, case-sensitive, compared as text","columns_searched":"all 4 columns","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":49,"stopped_at_byte":234,"file_size_bytes":234,"elapsed_seconds":0.02,"records_after_header":8},"outcome":"match_found","matches_returned":1,"matches":[{"record_number":5,"byte_offset":118,"matched_columns":["SecurityId"],"values":{"PortfolioCode":"PF003","SecurityId":"417382","Quantity":"900","SettlementCcy":"GBP"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (1 in total).","next_cursor":null,"near_misses":{"note":"Seen in the part of the file scanned. These are NOT exact matches and are not counted or returned as matches.","identifier_inside_a_longer_value":{"count":2,"examples":[{"record_number":2,"column":"SecurityId","value":"0417382"},{"record_number":3,"column":"SecurityId","value":"0417382"}]}}},"is_error":false},"across_name":{"tool":"search_across_columns","arguments":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","identifier":"Halvorsen"},"response":{"tool":"search_across_columns","file":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","size_bytes":151878,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"Halvorsen","match_type":"exact: whole field value, case-sensitive, compared as text","columns_searched":"all 7 columns","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":57,"stopped_at_byte":151878,"file_size_bytes":151878,"elapsed_seconds":0.02,"records_after_header":2005},"outcome":"confirmed_absent","matches_returned":0,"matches":[],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: no record has 'Halvorsen' as the exact value of any column. Not exact matches, but worth checking: 1 value(s) contain it inside a longer value (see near_misses).","next_cursor":null,"near_misses":{"note":"Seen in the part of the file scanned. These are NOT exact matches and are not counted or returned as matches.","identifier_inside_a_longer_value":{"count":1,"examples":[{"record_number":2,"column":"name","value":"Halvorsen Aerospace PLC"}]}}},"is_error":false},"across_both":{"tool":"search_across_columns","arguments":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","identifier":"0417382","columns":["portfolio_code","name"]},"response":{"tool":"search_across_columns","file":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","size_bytes":496,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"0417382","match_type":"exact: whole field value, case-sensitive, compared as text","columns_searched":"all 8 columns","columns_returned":["portfolio_code","name"],"max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":69,"stopped_at_byte":496,"file_size_bytes":496,"elapsed_seconds":0.02,"records_after_header":5},"outcome":"match_found","matches_returned":2,"matches":[{"record_number":2,"byte_offset":69,"matched_columns":["sedol"],"values":{"portfolio_code":"PF001","name":"Halvorsen Aerospace PLC","sedol":"0417382"}},{"record_number":3,"byte_offset":151,"matched_columns":["sedol"],"values":{"portfolio_code":"PF002","name":"Halvorsen Aerospace PLC","sedol":"0417382"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (2 in total).","next_cursor":null},"is_error":false},"count":{"tool":"count_matching_rows","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","identifier":"XLON","identifier_column":"ExchangeCode"},"response":{"tool":"count_matching_rows","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"XLON","match_type":"exact: whole field value, case-sensitive, compared as text","column":"ExchangeCode"},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":109,"stopped_at_byte":165317,"file_size_bytes":165317,"elapsed_seconds":0.02,"records_after_header":2009},"outcome":"match_found","count":2007,"count_is_exact":true,"explanation":"Complete scan: exactly 2007 record(s) have 'XLON' in column 'ExchangeCode'.","next_cursor":null},"is_error":false},"count_zero":{"tool":"count_matching_rows","arguments":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","identifier":"PF003","identifier_column":"portfolio_code"},"response":{"tool":"count_matching_rows","file":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","size_bytes":496,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"PF003","match_type":"exact: whole field value, case-sensitive, compared as text","column":"portfolio_code"},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":69,"stopped_at_byte":496,"file_size_bytes":496,"elapsed_seconds":0.02,"records_after_header":5},"outcome":"confirmed_absent","count":0,"count_is_exact":true,"explanation":"Complete scan: exactly 0 record(s) have 'PF003' in column 'portfolio_code'. No near misses were seen either.","next_cursor":null},"is_error":false},"truncated":{"tool":"find_security_in_file","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","identifier":"XLON","identifier_column":"ExchangeCode","columns":["ISIN","SecurityName"],"max_rows":3},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"XLON","match_type":"exact: whole field value, case-sensitive, compared as text","column":"ExchangeCode","columns_returned":["ISIN","SecurityName"],"max_rows":3},"scan":{"complete":false,"stop_reason":"row_limit","started_at_byte":109,"stopped_at_byte":525,"file_size_bytes":165317,"elapsed_seconds":0.02},"outcome":"match_found","matches_returned":3,"matches":[{"record_number":2,"byte_offset":109,"values":{"ISIN":"GB0004173829","SecurityName":"Halvorsen Aerospace PLC"}},{"record_number":4,"byte_offset":282,"values":{"ISIN":"GB00B7K2MN41","SecurityName":"Tidewater Energy PLC"}},{"record_number":6,"byte_offset":446,"values":{"ISIN":"GB0006291573","SecurityName":"Corbel Mining PLC"}}],"more_matches":"yes","results_are_partial":true,"explanation":"PARTIAL RESULTS: 3 matching record(s) returned and at least one more exists, because the row limit for one response was reached. Pass next_cursor to retrieve further matches.","next_cursor":"wA_c8KOicmvHynDyeyJmcCI6Ijc2NWFmMzAzZDY1NjhjNDRiNmU5MDA2MiIsIm8iOjUyNSwiciI6NiwibSI6M30="},"is_error":false},"page1":{"tool":"find_security_in_file","arguments":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","identifier":"PF001","identifier_column":"PortfolioCode","max_rows":2},"response":{"tool":"find_security_in_file","file":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","size_bytes":234,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"PF001","match_type":"exact: whole field value, case-sensitive, compared as text","column":"PortfolioCode","columns_returned":"all","max_rows":2},"scan":{"complete":false,"stop_reason":"row_limit","started_at_byte":49,"stopped_at_byte":140,"file_size_bytes":234,"elapsed_seconds":0.02},"outcome":"match_found","matches_returned":2,"matches":[{"record_number":2,"byte_offset":49,"values":{"PortfolioCode":"PF001","SecurityId":"0417382","Quantity":"1500","SettlementCcy":"GBP"}},{"record_number":4,"byte_offset":96,"values":{"PortfolioCode":"PF001","SecurityId":"2619045","Quantity":"40","SettlementCcy":"USD"}}],"more_matches":"yes","results_are_partial":true,"explanation":"PARTIAL RESULTS: 2 matching record(s) returned and at least one more exists, because the row limit for one response was reached. Pass next_cursor to retrieve further matches.","next_cursor":"9qDGMtWZgy91xiAWeyJmcCI6ImY4ZTU3ZmQxZjVmNzNmNzQ3MzZkYTNmYiIsIm8iOjE0MCwiciI6NSwibSI6Mn0="},"is_error":false},"page2":{"tool":"find_security_in_file","arguments":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","identifier":"PF001","identifier_column":"PortfolioCode","max_rows":2,"cursor":"9qDGMtWZgy91xiAWeyJmcCI6ImY4ZTU3ZmQxZjVmNzNmNzQ3MzZkYTNmYiIsIm8iOjE0MCwiciI6NSwibSI6Mn0="},"response":{"tool":"find_security_in_file","file":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","size_bytes":234,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"PF001","match_type":"exact: whole field value, case-sensitive, compared as text","column":"PortfolioCode","columns_returned":"all","resumed_from_cursor":true,"matches_in_earlier_responses":2,"max_rows":2},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":140,"stopped_at_byte":234,"file_size_bytes":234,"elapsed_seconds":0.02,"records_after_header":8,"note":"Together with the earlier responses in this cursor chain, the whole file has been scanned."},"outcome":"match_found","matches_returned":2,"matches":[{"record_number":6,"byte_offset":140,"values":{"PortfolioCode":"PF001","SecurityId":"B7K2MN4","Quantity":"0","SettlementCcy":"GBP"}},{"record_number":9,"byte_offset":212,"values":{"PortfolioCode":"PF001","SecurityId":"0058213","Quantity":"75","SettlementCcy":"GBP"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (4 in total, including earlier responses).","next_cursor":null},"is_error":false},"time_limit":{"tool":"count_matching_rows","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","identifier":"XLON","identifier_column":"ExchangeCode","max_scan_seconds":1e-09},"response":{"tool":"count_matching_rows","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"XLON","match_type":"exact: whole field value, case-sensitive, compared as text","column":"ExchangeCode"},"scan":{"complete":false,"stop_reason":"time_limit","started_at_byte":109,"stopped_at_byte":8227,"file_size_bytes":165317,"elapsed_seconds":0.02},"outcome":"match_found","count":null,"count_is_exact":false,"matches_seen_before_interruption":98,"explanation":"A complete count is NOT available because the scan time limit was reached before the end of the file. 98 matching record(s) were seen in the part scanned; this is a lower bound, not the count. Pass next_cursor to continue counting from where this scan stopped.","next_cursor":"C4Sk4VT88lZgBCdUeyJmcCI6IjViNzE3NjQ0MGJmZmQ0NDUyNmU3N2VkNiIsIm8iOjgyMjcsInIiOjEwMSwibSI6OTh9"},"is_error":false},"time_limit_resume":{"tool":"count_matching_rows","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","identifier":"XLON","identifier_column":"ExchangeCode","cursor":"C4Sk4VT88lZgBCdUeyJmcCI6IjViNzE3NjQ0MGJmZmQ0NDUyNmU3N2VkNiIsIm8iOjgyMjcsInIiOjEwMSwibSI6OTh9"},"response":{"tool":"count_matching_rows","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"XLON","match_type":"exact: whole field value, case-sensitive, compared as text","column":"ExchangeCode","resumed_from_cursor":true,"matches_in_earlier_responses":98},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":8227,"stopped_at_byte":165317,"file_size_bytes":165317,"elapsed_seconds":0.03,"records_after_header":2009,"note":"Together with the earlier responses in this cursor chain, the whole file has been scanned."},"outcome":"match_found","count":2007,"count_is_exact":true,"explanation":"Complete scan: exactly 2007 record(s) have 'XLON' in column 'ExchangeCode'.","next_cursor":null},"is_error":false},"compare_runs":{"tool":"compare_security_records","arguments":{"folder_a":"security_master/04_golden","filename_a":"security_master_20261113_20261113T183000.csv","folder_b":"security_master/04_golden","filename_b":"security_master_20261113_20261113T211500.csv","identifier":"US5128471093","identifier_column_a":"isin"},"response":{"tool":"compare_security_records","file_a":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T183000.csv","size_bytes":151806,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"file_b":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","size_bytes":151878,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"columns_not_compared":{"only_in_file_a_count":0,"only_in_file_a":[],"only_in_file_b_count":0,"only_in_file_b":[],"note":"Columns are paired by identical name unless column_mapping says otherwise; repeated names are not paired."},"search":{"identifier_a":"US5128471093","identifier_column_a":"isin","identifier_b":"US5128471093","identifier_column_b":"isin","match_type":"exact: whole field value, case-sensitive, compared as text","match_keys":[],"compared_columns":"all 7 columns of file A with exactly one counterpart in file B"},"presence":{"file_a":{"outcome":"match_found","matching_records_found":1,"scan_complete":true,"stop_reason":"end_of_file"},"file_b":{"outcome":"match_found","matching_records_found":1,"scan_complete":true,"stop_reason":"end_of_file"}},"elapsed_seconds":0.05,"comparisons":[{"record_a":{"record_number":3,"byte_offset":144},"record_b":{"record_number":3,"byte_offset":144},"changed_count":1,"unchanged_count":6,"changed":[{"column_a":"close_price","value_a":"452.1100","value_b":"455.0000"}],"unchanged":[{"column_a":"isin","value":"US5128471093"},{"column_a":"sedol","value":"2619045"},{"column_a":"name","value":"Larkspur Holdings, Inc."},{"column_a":"asset_class","value":"EQUITY"},{"column_a":"currency","value":"USD"},{"column_a":"sector","value":"Financials"}]}],"comparison_status":"compared","explanation":"Complete scans: 1 record pair(s) compared; 1 pair(s) have at least one differing value."},"is_error":false},"compare_ambiguous":{"tool":"compare_security_records","arguments":{"folder_a":"positions/01_custodian_raw","filename_a":"custodian_positions_20261113_20261113T200000.csv","folder_b":"positions/02_enriched","filename_b":"positions_enriched_20261113_20261113T200000.csv","identifier":"0417382","identifier_column_a":"SecurityId","identifier_column_b":"sedol","compare_columns":["PortfolioCode","Quantity"],"column_mapping":{"PortfolioCode":"portfolio_code","Quantity":"quantity"}},"response":{"tool":"compare_security_records","file_a":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","size_bytes":234,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"file_b":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","size_bytes":496,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier_a":"0417382","identifier_column_a":"SecurityId","identifier_b":"0417382","identifier_column_b":"sedol","match_type":"exact: whole field value, case-sensitive, compared as text","match_keys":[],"compared_columns":[{"a":"PortfolioCode","b":"portfolio_code"},{"a":"Quantity","b":"quantity"}]},"presence":{"file_a":{"outcome":"match_found","matching_records_found":2,"scan_complete":true,"stop_reason":"end_of_file"},"file_b":{"outcome":"match_found","matching_records_found":2,"scan_complete":true,"stop_reason":"end_of_file"}},"elapsed_seconds":0.04,"columns_that_differ_between_matches":{"file_a":["PortfolioCode","Quantity"],"file_b":["portfolio_code","quantity","market_value"]},"records_in_file_a":[{"record_number":2,"byte_offset":49,"values":{"PortfolioCode":"PF001","Quantity":"1500"}},{"record_number":3,"byte_offset":73,"values":{"PortfolioCode":"PF002","Quantity":"250"}}],"records_in_file_b":[{"record_number":2,"byte_offset":69,"values":{"portfolio_code":"PF001","quantity":"1500"}},{"record_number":3,"byte_offset":151,"values":{"portfolio_code":"PF002","quantity":"250"}}],"comparison_status":"ambiguous_alignment","explanation":"AMBIGUOUS: file A has 2 matching record(s) and file B has 2, and no match_keys were given, so records cannot be paired reliably. No comparison was made. Supply match_keys that identify one record per file (see columns_that_differ_between_matches), or compare specific records using find_security_in_file."},"is_error":false},"compare_keys":{"tool":"compare_security_records","arguments":{"folder_a":"positions/01_custodian_raw","filename_a":"custodian_positions_20261113_20261113T200000.csv","folder_b":"positions/02_enriched","filename_b":"positions_enriched_20261113_20261113T200000.csv","identifier":"0417382","identifier_column_a":"SecurityId","identifier_column_b":"sedol","compare_columns":["PortfolioCode","Quantity"],"column_mapping":{"PortfolioCode":"portfolio_code","Quantity":"quantity"},"match_keys":["PortfolioCode"]},"response":{"tool":"compare_security_records","file_a":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","size_bytes":234,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"file_b":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","size_bytes":496,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier_a":"0417382","identifier_column_a":"SecurityId","identifier_b":"0417382","identifier_column_b":"sedol","match_type":"exact: whole field value, case-sensitive, compared as text","match_keys":[{"a":"PortfolioCode","b":"portfolio_code"}],"compared_columns":[{"a":"PortfolioCode","b":"portfolio_code"},{"a":"Quantity","b":"quantity"}]},"presence":{"file_a":{"outcome":"match_found","matching_records_found":2,"scan_complete":true,"stop_reason":"end_of_file"},"file_b":{"outcome":"match_found","matching_records_found":2,"scan_complete":true,"stop_reason":"end_of_file"}},"elapsed_seconds":0.04,"comparisons":[{"key":{"PortfolioCode":"PF001"},"record_a":{"record_number":2,"byte_offset":49},"record_b":{"record_number":2,"byte_offset":69},"changed_count":0,"unchanged_count":2,"changed":[],"unchanged":[{"column_a":"PortfolioCode","column_b":"portfolio_code","value":"PF001"},{"column_a":"Quantity","column_b":"quantity","value":"1500"}]},{"key":{"PortfolioCode":"PF002"},"record_a":{"record_number":3,"byte_offset":73},"record_b":{"record_number":3,"byte_offset":151},"changed_count":0,"unchanged_count":2,"changed":[],"unchanged":[{"column_a":"PortfolioCode","column_b":"portfolio_code","value":"PF002"},{"column_a":"Quantity","column_b":"quantity","value":"250"}]}],"comparison_status":"compared","explanation":"Complete scans: 2 record pair(s) compared; 0 pair(s) have at least one differing value."},"is_error":false},"compare_one_side":{"tool":"compare_security_records","arguments":{"folder_a":"security_master/01_vendor_raw","filename_a":"vendor_ref_20261113_20261113T204700.csv","folder_b":"security_master/02_normalised","filename_b":"sm_normalised_20261113_20261113T211500.csv","identifier":"GB0006291573","identifier_column_a":"ISIN","column_mapping":{"ISIN":"isin"},"compare_columns":["ISIN"]},"response":{"tool":"compare_security_records","file_a":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T204700.csv","size_bytes":165397,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"file_b":{"folder":"security_master/02_normalised","filename":"sm_normalised_20261113_20261113T211500.csv","size_bytes":143152,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier_a":"GB0006291573","identifier_column_a":"ISIN","identifier_b":"GB0006291573","identifier_column_b":"isin","match_type":"exact: whole field value, case-sensitive, compared as text","match_keys":[],"compared_columns":[{"a":"ISIN","b":"isin"}]},"presence":{"file_a":{"outcome":"match_found","matching_records_found":1,"scan_complete":true,"stop_reason":"end_of_file"},"file_b":{"outcome":"confirmed_absent","matching_records_found":0,"scan_complete":true,"stop_reason":"end_of_file"}},"elapsed_seconds":0.05,"records_in_file_a":[{"record_number":6,"byte_offset":446,"values":{"ISIN":"GB0006291573"}}],"comparison_status":"present_in_one_file_only","explanation":"Complete scans: the security is in file A (1 record(s)) and absent from file B."},"is_error":false},"err_column":{"tool":"find_security_in_file","arguments":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","identifier":"0417382","identifier_column":"SEDOL"},"response":{"tool":"find_security_in_file","outcome":"inconclusive","explanation":"INCONCLUSIVE: no search was carried out. 'security_master_20261113_20261113T211500.csv' has no column named 'SEDOL' (column names are matched exactly).","error":{"type":"column_not_found","message":"'security_master_20261113_20261113T211500.csv' has no column named 'SEDOL' (column names are matched exactly).","similar_column_names":["sedol"],"hint":"Use search_column_names or inspect_csv_headers to find the right column."},"request":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211500.csv","identifier":"0417382","identifier_column":"SEDOL"}},"is_error":true},"err_file":{"tool":"count_matching_rows","arguments":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211600.csv","identifier":"0417382","identifier_column":"sedol"},"response":{"tool":"count_matching_rows","outcome":"inconclusive","explanation":"INCONCLUSIVE: no search was carried out. No file named 'security_master_20261113_20261113T211600.csv' in folder 'security_master/04_golden'.","error":{"type":"file_not_found","message":"No file named 'security_master_20261113_20261113T211600.csv' in folder 'security_master/04_golden'.","closest_filenames":["security_master_20261113_20261113T211500.csv","security_master_20261113_20261113T183000.csv","security_master_20261112_20261112T183000.csv"],"hint":"Call list_csv_files to see the files that exist."},"request":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T211600.csv","identifier":"0417382","identifier_column":"sedol"}},"is_error":true},"err_folder":{"tool":"list_csv_files","arguments":{"folder":"security_master/05_archive"},"response":{"tool":"list_csv_files","error":{"type":"folder_not_found","message":"'security_master/05_archive' is not a folder described by any process map. Only mapped folders can be read.","closest_known_folders":["security_master/02_normalised","security_master/04_golden","security_master/01_vendor_raw","security_master/03a_equity_enriched","security_master/03b_fixed_income_enriched"],"hint":"Call list_folders for the full inventory."},"request":{"folder":"security_master/05_archive","offset":0}},"is_error":true},"bad_utf16":{"tool":"search_across_columns","arguments":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261114_20261114T200000.csv","identifier":"0417382"},"response":{"tool":"search_across_columns","outcome":"inconclusive","explanation":"INCONCLUSIVE: no search was carried out. 'custodian_positions_20261114_20261114T200000.csv' looks like UTF-16 or UTF-32 text (or binary data), which cannot be searched. Supported encodings are single-byte or UTF-8; this folder is declared as utf-8. Nothing can be concluded about this file's contents.","error":{"type":"unsupported_encoding","message":"'custodian_positions_20261114_20261114T200000.csv' looks like UTF-16 or UTF-32 text (or binary data), which cannot be searched. Supported encodings are single-byte or UTF-8; this folder is declared as utf-8. Nothing can be concluded about this file's contents."},"request":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261114_20261114T200000.csv","identifier":"0417382"}},"is_error":true},"bad_quote":{"tool":"find_security_in_file","arguments":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261115_20261115T200000.csv","identifier":"0417382","identifier_column":"SecurityId"},"response":{"tool":"find_security_in_file","file":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261115_20261115T200000.csv","size_bytes":226,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"0417382","match_type":"exact: whole field value, case-sensitive, compared as text","column":"SecurityId","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":48,"stopped_at_byte":226,"file_size_bytes":226,"elapsed_seconds":0.03,"records_after_header":3},"outcome":"match_found","matches_returned":2,"matches":[{"record_number":2,"byte_offset":48,"values":{"PortfolioCode":"PF001","SecurityId":"0417382","Quantity":"1500","SettlementCcy":"GBP"}},{"record_number":3,"byte_offset":71,"values":{"PortfolioCode":"PF002","SecurityId":"0417382","Quantity":"250","SettlementCcy":"GBP"}}],"more_matches":"unknown","results_are_partial":true,"explanation":"PARTIAL RESULTS: the scan is incomplete or unreliable because the file could not be read reliably (see warnings). The 2 record(s) returned are only the matches that could be read; there may be more.","next_cursor":null,"warnings":["The file ends inside a quoted field (unterminated quote): the final record is incomplete and records may be hidden inside it."]},"is_error":false},"bad_delimiter":{"tool":"search_across_columns","arguments":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261116_20261116T200000.csv","identifier":"0417382"},"response":{"tool":"search_across_columns","file":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261116_20261116T200000.csv","size_bytes":225,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"0417382","match_type":"exact: whole field value, case-sensitive, compared as text","columns_searched":"all 1 columns","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":48,"stopped_at_byte":225,"file_size_bytes":225,"elapsed_seconds":0.03,"records_after_header":8},"outcome":"inconclusive","matches_returned":0,"matches":[],"more_matches":"unknown","results_are_partial":true,"explanation":"INCONCLUSIVE: no match was found, but absence is not confirmed because the file could not be read reliably (see warnings). Not exact matches, but worth checking: 2 value(s) contain it inside a longer value (see near_misses).","next_cursor":null,"warnings":["The header row parsed as a single column containing several ';' characters, so the file is probably delimited by ';', not ',' as declared for this folder. Values cannot be matched until the folder's csv_format in the process map is corrected."],"near_misses":{"note":"Seen in the part of the file scanned. These are NOT exact matches and are not counted or returned as matches.","identifier_inside_a_longer_value":{"count":2,"examples":[{"record_number":2,"column":"PortfolioCode;SecurityId;Quantity;SettlementCcy","value":"PF001;0417382;1500;GBP"},{"record_number":3,"column":"PortfolioCode;SecurityId;Quantity;SettlementCcy","value":"PF002;0417382;250;GBP"}]}}},"is_error":false},"inv_client_pf003":{"tool":"search_across_columns","arguments":{"folder":"positions/03a_client_report","filename":"client_holdings_20261113_20261113T200000.csv","identifier":"PF003"},"response":{"tool":"search_across_columns","file":{"folder":"positions/03a_client_report","filename":"client_holdings_20261113_20261113T200000.csv","size_bytes":303,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"PF003","match_type":"exact: whole field value, case-sensitive, compared as text","columns_searched":"all 5 columns","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":42,"stopped_at_byte":303,"file_size_bytes":303,"elapsed_seconds":0.02,"records_after_header":4},"outcome":"confirmed_absent","matches_returned":0,"matches":[],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: no record has 'PF003' as the exact value of any column. No near misses were seen either.","next_cursor":null},"is_error":false},"inv_custodian_pf003":{"tool":"search_across_columns","arguments":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","identifier":"PF003"},"response":{"tool":"search_across_columns","file":{"folder":"positions/01_custodian_raw","filename":"custodian_positions_20261113_20261113T200000.csv","size_bytes":234,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"PF003","match_type":"exact: whole field value, case-sensitive, compared as text","columns_searched":"all 4 columns","columns_returned":"all","max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":49,"stopped_at_byte":234,"file_size_bytes":234,"elapsed_seconds":0.02,"records_after_header":8},"outcome":"match_found","matches_returned":1,"matches":[{"record_number":5,"byte_offset":118,"matched_columns":["PortfolioCode"],"values":{"PortfolioCode":"PF003","SecurityId":"417382","Quantity":"900","SettlementCcy":"GBP"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (1 in total).","next_cursor":null},"is_error":false},"inv_gold_1830_lost_zero":{"tool":"find_security_in_file","arguments":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T183000.csv","identifier":"417382","identifier_column":"sedol","columns":["isin","sedol","name"]},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T183000.csv","size_bytes":151806,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"417382","match_type":"exact: whole field value, case-sensitive, compared as text","column":"sedol","columns_returned":["isin","sedol","name"],"max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":57,"stopped_at_byte":151806,"file_size_bytes":151806,"elapsed_seconds":0.02,"records_after_header":2004},"outcome":"confirmed_absent","matches_returned":0,"matches":[],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: no record has '417382' as the exact value of column 'sedol'. Not exact matches, but worth checking: 1 value(s) contain it inside a longer value (see near_misses).","next_cursor":null,"near_misses":{"note":"Seen in the part of the file scanned. These are NOT exact matches and are not counted or returned as matches.","identifier_inside_a_longer_value":{"count":1,"examples":[{"record_number":2,"column":"sedol","value":"0417382"}]}}},"is_error":false},"inv_gold_1830_match":{"tool":"find_security_in_file","arguments":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T183000.csv","identifier":"0417382","identifier_column":"sedol","columns":["isin","sedol","name"]},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/04_golden","filename":"security_master_20261113_20261113T183000.csv","size_bytes":151806,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"0417382","match_type":"exact: whole field value, case-sensitive, compared as text","column":"sedol","columns_returned":["isin","sedol","name"],"max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":57,"stopped_at_byte":151806,"file_size_bytes":151806,"elapsed_seconds":0.02,"records_after_header":2004},"outcome":"match_found","matches_returned":1,"matches":[{"record_number":2,"byte_offset":57,"values":{"isin":"GB0004173829","sedol":"0417382","name":"Halvorsen Aerospace PLC"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (1 in total).","next_cursor":null},"is_error":false},"inv_enriched_larkspur":{"tool":"find_security_in_file","arguments":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","identifier":"US5128471093","identifier_column":"isin","columns":["portfolio_code","quantity","price","market_value"]},"response":{"tool":"find_security_in_file","file":{"folder":"positions/02_enriched","filename":"positions_enriched_20261113_20261113T200000.csv","size_bytes":496,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"US5128471093","match_type":"exact: whole field value, case-sensitive, compared as text","column":"isin","columns_returned":["portfolio_code","quantity","price","market_value"],"max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":69,"stopped_at_byte":496,"file_size_bytes":496,"elapsed_seconds":0.02,"records_after_header":5},"outcome":"match_found","matches_returned":1,"matches":[{"record_number":4,"byte_offset":231,"values":{"portfolio_code":"PF001","quantity":"40","price":"452.1100","market_value":"18084.40"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (1 in total).","next_cursor":null},"is_error":false},"inv_vendor_1802_larkspur":{"tool":"find_security_in_file","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","identifier":"US5128471093","identifier_column":"ISIN","columns":["SecurityName","ClosePrice"]},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T180200.csv","size_bytes":165317,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"US5128471093","match_type":"exact: whole field value, case-sensitive, compared as text","column":"ISIN","columns_returned":["SecurityName","ClosePrice"],"max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":109,"stopped_at_byte":165317,"file_size_bytes":165317,"elapsed_seconds":0.02,"records_after_header":2009},"outcome":"match_found","matches_returned":1,"matches":[{"record_number":3,"byte_offset":195,"values":{"SecurityName":"Larkspur Holdings, Inc.","ClosePrice":"452.11000"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (1 in total).","next_cursor":null},"is_error":false},"inv_vendor_2047_larkspur":{"tool":"find_security_in_file","arguments":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T204700.csv","identifier":"US5128471093","identifier_column":"ISIN","columns":["SecurityName","ClosePrice"]},"response":{"tool":"find_security_in_file","file":{"folder":"security_master/01_vendor_raw","filename":"vendor_ref_20261113_20261113T204700.csv","size_bytes":165397,"filesystem_modified_time":"2026-11-14T02:10:00+00:00"},"search":{"identifier":"US5128471093","match_type":"exact: whole field value, case-sensitive, compared as text","column":"ISIN","columns_returned":["SecurityName","ClosePrice"],"max_rows":25},"scan":{"complete":true,"stop_reason":"end_of_file","started_at_byte":109,"stopped_at_byte":165397,"file_size_bytes":165397,"elapsed_seconds":0.02,"records_after_header":2010},"outcome":"match_found","matches_returned":1,"matches":[{"record_number":3,"byte_offset":195,"values":{"SecurityName":"Larkspur Holdings, Inc.","ClosePrice":"455.00000"}}],"more_matches":"none","results_are_partial":false,"explanation":"Complete scan: all matching records have been returned (1 in total).","next_cursor":null},"is_error":false}}</script>
+<!--EXAMPLES:END-->
+
+<script>
+(function () {
+  "use strict";
+  var EX = {};
+  try { EX = JSON.parse(document.getElementById("examples").textContent); } catch (e) { EX = {}; }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; });
+  }
+  function el(tag, cls, html) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (html !== undefined) node.innerHTML = html;
+    return node;
+  }
+  function get(obj, path) {
+    return path.split(".").reduce(function (cur, part) { return cur == null ? undefined : cur[part]; }, obj);
+  }
+
+  // ---------------------------------------------------------------- JSON rendering
+  function isFlat(v) {
+    var vals = Array.isArray(v) ? v : Object.keys(v).map(function (k) { return v[k]; });
+    return vals.every(function (x) { return x === null || typeof x !== "object"; }) && JSON.stringify(v).length < 72;
+  }
+  function jsonHtml(v, depth) {
+    var pad = "  ".repeat(depth), pad2 = "  ".repeat(depth + 1);
+    if (v === null) return '<span class="j-lit">null</span>';
+    if (typeof v === "string") return '<span class="j-str">' + esc(JSON.stringify(v)) + "</span>";
+    if (typeof v === "number") return '<span class="j-num">' + v + "</span>";
+    if (typeof v === "boolean") return '<span class="j-lit">' + v + "</span>";
+    function key(k) { return '<span class="j-key">' + esc(JSON.stringify(k)) + "</span>"; }
+    if (Array.isArray(v)) {
+      if (!v.length) return "[]";
+      if (isFlat(v)) return "[" + v.map(function (x) { return jsonHtml(x, 0); }).join(", ") + "]";
+      return "[\n" + v.map(function (x) { return pad2 + jsonHtml(x, depth + 1); }).join(",\n") + "\n" + pad + "]";
+    }
+    var keys = Object.keys(v);
+    if (!keys.length) return "{}";
+    if (isFlat(v)) return "{ " + keys.map(function (k) { return key(k) + ": " + jsonHtml(v[k], 0); }).join(", ") + " }";
+    return "{\n" + keys.map(function (k) { return pad2 + key(k) + ": " + jsonHtml(v[k], depth + 1); }).join(",\n") + "\n" + pad + "}";
+  }
+
+  function chipFor(response) {
+    var kind = { match_found: "found", confirmed_absent: "absent", inconclusive: "unsure", compared: "found",
+      partially_compared: "info", ambiguous_alignment: "unsure", present_in_one_file_only: "info", absent_from_both: "absent" };
+    var label = response.comparison_status || response.outcome;
+    if (response.error && (!label || label === "inconclusive")) {
+      return (label ? '<span class="chip unsure">' + esc(label) + "</span> " : "") + '<span class="chip error">' + esc(response.error.type) + "</span>";
+    }
+    return label ? '<span class="chip ' + (kind[label] || "info") + '">' + esc(label) + "</span>" : "";
+  }
+
+  function copyText(text, button) {
+    var done = function () { var old = button.textContent; button.textContent = "Copied"; setTimeout(function () { button.textContent = old; }, 1400); };
+    try {
+      navigator.clipboard.writeText(text).then(done, function () { button.textContent = "Select and copy"; });
+    } catch (e) { button.textContent = "Select and copy"; }
+  }
+
+  // ---------------------------------------------------------------- example viewers
+  document.querySelectorAll("figure.ex").forEach(function (fig) {
+    var item = EX[fig.dataset.ex];
+    if (!item) { fig.appendChild(el("div", "ex-part", "<em>Example not available. Run scripts/build_guide.py.</em>")); return; }
+    var paths = (fig.dataset.keys || "").split(",").filter(Boolean);
+    var shownArgs = JSON.parse(JSON.stringify(item.arguments));
+    if (shownArgs.cursor) shownArgs.cursor = shownArgs.cursor.slice(0, 18) + "…";
+
+    var call = el("div", "ex-part");
+    var callBar = el("div", "ex-bar", '<span class="label">Call</span><span class="tool-name">' + esc(item.tool) + "</span>");
+    var copy = el("button", "push", "Copy arguments");
+    copy.type = "button";
+    copy.addEventListener("click", function () { copyText(JSON.stringify(item.arguments, null, 2), copy); });
+    callBar.appendChild(copy);
+    call.appendChild(callBar);
+    call.appendChild(el("pre", "json", jsonHtml(shownArgs, 0)));
+
+    var res = el("div", "ex-part");
+    var resBar = el("div", "ex-bar", '<span class="label">Response</span>' + chipFor(item.response));
+    var toggle = el("button", "push", "Show whole response");
+    toggle.type = "button";
+    resBar.appendChild(toggle);
+    var pre = el("pre", "json");
+    var total = Object.keys(item.response).length;
+    function render(whole) {
+      if (whole || !paths.length) { pre.innerHTML = jsonHtml(item.response, 0); return; }
+      var subset = {};
+      paths.forEach(function (p) { var value = get(item.response, p); if (value !== undefined) subset[p] = value; });
+      var hidden = total - paths.filter(function (p) { return p.indexOf(".") < 0 && item.response[p] !== undefined; }).length;
+      pre.innerHTML = jsonHtml(subset, 0) + (hidden > 0 ? '\n<span class="j-more">… selected fields shown; ' + total + " top-level fields in the whole response</span>" : "");
+    }
+    var whole = false;
+    render(false);
+    if (!paths.length) toggle.hidden = true;
+    toggle.addEventListener("click", function () { whole = !whole; render(whole); toggle.textContent = whole ? "Show selected fields" : "Show whole response"; });
+    res.appendChild(resBar);
+    res.appendChild(pre);
+    fig.appendChild(call);
+    fig.appendChild(res);
+  });
+
+  // ---------------------------------------------------------------- process diagram
+  var maps = {
+    security_master: get(EX, "pm_security_master.response.process"),
+    eod_positions: get(EX, "pm_eod.response.process")
+  };
+  var panel = document.getElementById("step-panel");
+  function list(items) { return "<ul>" + items.map(function (i) { return "<li>" + i + "</li>"; }).join("") + "</ul>"; }
+  function showStep(proc, stepId) {
+    var map = maps[proc];
+    document.querySelectorAll(".step").forEach(function (g) {
+      g.setAttribute("aria-pressed", String(g.dataset.proc === proc && g.dataset.step === stepId));
+    });
+    if (!map) { panel.innerHTML = "<p>Process map not available.</p>"; return; }
+    var step = map.steps.filter(function (s) { return s.id === stepId; })[0];
+    var folders = {};
+    map.folders.forEach(function (f) { folders[f.id] = f; });
+    function folderLines(ids) {
+      return list((ids || []).map(function (id) { return "<code>" + esc(folders[id].path) + "</code><br>" + esc(folders[id].description); }));
+    }
+    var html = '<div class="full"><p class="label">' + esc(map.name) + "</p><h3>" + esc(step.name) + " <code>" + esc(step.id) + "</code></h3><p>" + esc(step.description) + "</p></div>";
+    if (step.reads) html += "<div><h4>Reads</h4>" + folderLines(step.reads) + "</div>";
+    if (step.writes) html += "<div><h4>Writes</h4>" + folderLines(step.writes) + "</div>";
+    if (step.branch_condition) html += "<div><h4>Which rows take this branch</h4><p>" + esc(step.branch_condition) + "</p></div>";
+    if (step.downstream) html += "<div><h4>Feeds</h4><p>" + step.downstream.map(function (d) { return "<code>" + esc(d) + "</code>"; }).join(" ") + (step.downstream.length > 1 ? " (a branch)" : "") + "</p></div>";
+    if (step.filter_rules) html += '<div class="full"><h4>Why a security can disappear here</h4>' + list(step.filter_rules.map(esc)) + "</div>";
+    if (step.transformation_rules) html += '<div class="full"><h4>What it changes</h4>' + list(step.transformation_rules.map(esc)) + "</div>";
+    if (step.field_mappings) html += '<div class="full"><h4>Column mappings</h4>' + list(step.field_mappings.map(function (m) {
+      return "<code>" + esc(m.from_column) + "</code> in " + esc(m.from_folder) + " becomes <code>" + esc(m.to_column) + "</code> in " + esc(m.to_folder) + (m.rule ? ". " + esc(m.rule) : "");
+    })) + "</div>";
+    panel.innerHTML = html;
+  }
+  document.querySelectorAll(".step").forEach(function (g) {
+    var go = function () { showStep(g.dataset.proc, g.dataset.step); };
+    g.addEventListener("click", go);
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
+  showStep("security_master", "normalise");
+
+  // ---------------------------------------------------------------- runs table
+  (function () {
+    var body = document.querySelector("#runs-table tbody");
+    var files = get(EX, "files_normalised.response.files") || [];
+    var latest = {};
+    files.forEach(function (f) {
+      var t = f.filename_tokens; if (!t) return;
+      if (!latest[t.business_date] || t.run_timestamp > latest[t.business_date]) latest[t.business_date] = t.run_timestamp;
+    });
+    var counts = {};
+    files.forEach(function (f) { if (f.filename_tokens) counts[f.filename_tokens.business_date] = (counts[f.filename_tokens.business_date] || 0) + 1; });
+    files.forEach(function (f) {
+      var t = f.filename_tokens || {};
+      var lag = t.run_timestamp ? Math.round((Date.parse(t.run_timestamp.slice(0, 10)) - Date.parse(t.business_date)) / 86400000) : 0;
+      var reading, cls;
+      if (t.backfill || lag >= 2) { reading = "Backfill: run " + lag + " days after its business date"; cls = "unsure"; }
+      else if (counts[t.business_date] > 1 && t.run_timestamp === latest[t.business_date]) { reading = "Rerun: supersedes the earlier run"; cls = "found"; }
+      else if (counts[t.business_date] > 1) { reading = "Superseded by a later run"; cls = "absent"; }
+      else { reading = "Normal run"; cls = "info"; }
+      var row = el("tr", "", '<td class="mono">' + esc(f.filename) + '</td><td class="num">' + esc(t.business_date || "") + '</td><td class="num">' +
+        esc((t.run_timestamp || "").replace("T", " ").slice(0, 16)) + '</td><td class="num">' + esc(f.filesystem_modified_time.replace("T", " ").slice(0, 16)) +
+        '</td><td><span class="chip ' + cls + '">' + esc(reading) + "</span></td>");
+      body.appendChild(row);
+    });
+  })();
+
+  // ---------------------------------------------------------------- outcome decoder
+  (function () {
+    var stop = document.getElementById("dec-stop"), match = document.getElementById("dec-match"), sound = document.getElementById("dec-sound");
+    var fields = document.getElementById("dec-fields"), meaning = document.getElementById("dec-meaning");
+    function update() {
+      var reason = stop.value, ok = sound.value === "1";
+      if (reason === "row_limit" || reason === "output_size_limit") match.value = "1";
+      match.disabled = reason === "row_limit" || reason === "output_size_limit";
+      var found = match.value === "1", ended = reason === "end_of_file";
+      var outcome = found ? "match_found" : (ended && ok ? "confirmed_absent" : "inconclusive");
+      var more = ended ? (ok ? "none" : "unknown") : (reason === "row_limit" || reason === "output_size_limit" ? "yes" : "unknown");
+      var cursor = !ended && reason !== "error";
+      var kind = { match_found: "found", confirmed_absent: "absent", inconclusive: "unsure" }[outcome];
+      fields.innerHTML =
+        "<dt>outcome</dt><dd><span class=\"chip " + kind + "\">" + outcome + "</span></dd>" +
+        "<dt>scan.complete</dt><dd>" + ended + "</dd>" +
+        "<dt>more_matches</dt><dd>\"" + more + "\"</dd>" +
+        "<dt>results_are_partial</dt><dd>" + (more !== "none") + "</dd>" +
+        "<dt>next_cursor</dt><dd>" + (cursor ? "a token" : "null") + "</dd>" +
+        "<dt>count (if counting)</dt><dd>" + (ended && ok ? "an exact number" : "null") + "</dd>" +
+        (ok ? "" : "<dt>warnings</dt><dd>what is wrong with the file</dd>");
+      var text;
+      if (reason === "cancelled") text = "Over MCP you would not see this response at all: a cancelled request gets no reply. The scan itself stops and records this state. To receive partial results, use a time limit.";
+      else if (outcome === "confirmed_absent") text = "The value is not in this file in the searched column or columns. You can state that as a fact about this file.";
+      else if (outcome === "inconclusive" && ended) text = "The whole file was read, but the file cannot be trusted, so a missing value is not proven absent. Fix or replace the file.";
+      else if (outcome === "inconclusive") text = "Nothing was found in the part that was read. That says nothing about the rest. " + (cursor ? "Continue with the cursor." : "Resolve the error first.");
+      else if (more === "none") text = "The value is present and every matching row has been returned.";
+      else if (more === "yes") text = "The value is present and there are more matching rows than this response holds. Continue with the cursor to get them.";
+      else text = "The value is present. Whether there are more matching rows is not known" + (ok ? ", because the scan did not finish." : ", because the file could not be read reliably.");
+      meaning.textContent = text;
+    }
+    [stop, match, sound].forEach(function (c) { c.addEventListener("change", update); });
+    update();
+  })();
+
+  // ---------------------------------------------------------------- exact-match bench
+  (function () {
+    var rows = [
+      { sedol: "0417382", name: "Halvorsen Aerospace PLC", previous_sedol: "0417381" },
+      { sedol: "2619045", name: "Larkspur Holdings, Inc.", previous_sedol: "" },
+      { sedol: "B7K2MN4 ", name: "Tidewater Energy PLC", previous_sedol: "" },
+      { sedol: "0058213", name: "Pendle Robotics PLC", previous_sedol: "" }
+    ];
+    var cols = ["sedol", "name", "previous_sedol"];
+    var input = document.getElementById("m-value"), colSel = document.getElementById("m-col");
+    var body = document.querySelector("#m-table tbody"), outcome = document.getElementById("m-outcome");
+    var explain = document.getElementById("m-explain"), near = document.getElementById("m-near");
+    function show(v) { return esc(v).replace(/ /g, '<span class="ws" title="a space">␠</span>'); }
+    function update() {
+      var value = input.value, col = colSel.value, searched = col === "*" ? cols : [col];
+      var hits = 0, longer = [], padded = [], elsewhere = {};
+      body.innerHTML = "";
+      rows.forEach(function (r, i) {
+        var matched = value !== "" && searched.some(function (c) { return r[c] === value; });
+        var isNear = false;
+        if (matched) hits++;
+        else if (value !== "") {
+          searched.forEach(function (c) {
+            if (r[c].trim() === value.trim()) { padded.push({ rec: i + 2, col: c, val: r[c] }); isNear = true; }
+            else if (r[c].indexOf(value) >= 0) { longer.push({ rec: i + 2, col: c, val: r[c] }); isNear = true; }
+          });
+          if (col !== "*") cols.forEach(function (c) { if (c !== col && r[c] === value) { elsewhere[c] = (elsewhere[c] || 0) + 1; isNear = true; } });
+        }
+        body.appendChild(el("tr", matched ? "hit" : (isNear ? "near" : ""), '<td class="num">' + (i + 2) + "</td>" +
+          cols.map(function (c) { return '<td class="mono">' + show(r[c]) + "</td>"; }).join("")));
+      });
+      var where = col === "*" ? "any column" : "column 'sedol'";
+      if (value === "") { outcome.innerHTML = '<span class="chip error">invalid_argument</span>'; explain.textContent = "The search value must not be empty."; near.innerHTML = ""; return; }
+      outcome.innerHTML = hits ? '<span class="chip found">match_found</span>' : '<span class="chip absent">confirmed_absent</span>';
+      explain.textContent = hits ? hits + " record(s) have '" + value + "' as the exact value of " + where + "."
+        : "No record has '" + value + "' as the exact value of " + where + ".";
+      var items = [];
+      longer.forEach(function (n) { items.push("<b>inside a longer value</b>: record " + n.rec + ", " + esc(n.col) + " = <code>" + show(n.val) + "</code>"); });
+      padded.forEach(function (n) { items.push("<b>same value with surrounding whitespace</b>: record " + n.rec + ", " + esc(n.col) + " = <code>" + show(n.val) + "</code>"); });
+      Object.keys(elsewhere).forEach(function (c) { items.push("<b>exact value in another column</b>: <code>" + esc(c) + "</code>"); });
+      near.innerHTML = items.length ? items.map(function (i) { return "<li>" + i + "</li>"; }).join("") : "<li>None seen.</li>";
+    }
+    input.addEventListener("input", update);
+    colSel.addEventListener("change", update);
+    document.getElementById("m-presets").addEventListener("click", function (e) {
+      if (e.target.dataset && e.target.dataset.v !== undefined) { input.value = e.target.dataset.v; update(); }
+    });
+    update();
+  })();
+
+  // ---------------------------------------------------------------- pager
+  (function () {
+    var host = document.getElementById("pager");
+    var pages = [EX.page1, EX.page2].filter(Boolean);
+    if (!pages.length) return;
+    function card(i) {
+      var item = pages[i], r = item.response;
+      var args = i === 0 ? "identifier \"PF001\", identifier_column \"PortfolioCode\", max_rows 2" : "the same arguments, plus cursor \"" + item.arguments.cursor.slice(0, 14) + "…\"";
+      var box = el("div", "pager-call");
+      box.appendChild(el("div", "ex-bar", '<span class="label">Call ' + (i + 1) + '</span><span class="tool-name">find_security_in_file</span>' + chipFor(r)));
+      box.appendChild(el("p", "", "<small>" + esc(args) + "</small>"));
+      var rows = el("ul", "pager-rows");
+      r.matches.forEach(function (m) {
+        rows.appendChild(el("li", "", "record " + m.record_number + " · SecurityId " + esc(m.values.SecurityId) + " · Quantity " + esc(m.values.Quantity)));
+      });
+      box.appendChild(rows);
+      box.appendChild(el("dl", "kv", "<dt>more_matches</dt><dd>\"" + r.more_matches + "\"</dd><dt>results_are_partial</dt><dd>" + r.results_are_partial +
+        "</dd><dt>scan</dt><dd>bytes " + r.scan.started_at_byte + " to " + r.scan.stopped_at_byte + " of " + r.scan.file_size_bytes + "</dd><dt>explanation</dt><dd>" + esc(r.explanation) + "</dd>"));
+      return box;
+    }
+    host.appendChild(card(0));
+    if (pages.length > 1) {
+      var next = el("button", "", "Call again with next_cursor");
+      next.type = "button";
+      next.style.alignSelf = "flex-start";
+      next.addEventListener("click", function () { next.hidden = true; host.appendChild(card(1)); });
+      host.appendChild(next);
+    }
+  })();
+
+  // ---------------------------------------------------------------- contents highlight and theme
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll("#toc a"));
+    var sections = links.map(function (a) { return document.getElementById(a.getAttribute("href").slice(1)); });
+    function mark() {
+      var current = 0;
+      sections.forEach(function (s, i) { if (s && s.getBoundingClientRect().top <= 140) current = i; });
+      links.forEach(function (a, i) { if (i === current) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current"); });
+    }
+    var ticking = false;
+    window.addEventListener("scroll", function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { mark(); ticking = false; });
+    }, { passive: true });
+    mark();
+
+    var button = document.getElementById("theme-btn"), root = document.documentElement;
+    function isDark() {
+      var set = root.getAttribute("data-theme");
+      return set ? set === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    }
+    function label() { button.textContent = isDark() ? "Switch to light" : "Switch to dark"; }
+    button.addEventListener("click", function () { root.setAttribute("data-theme", isDark() ? "light" : "dark"); label(); });
+    label();
+  })();
+})();
+</script>
+<!--/PAGE:BODY-->
+</body>
+</html>

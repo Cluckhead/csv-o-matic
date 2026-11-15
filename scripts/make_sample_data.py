@@ -4,7 +4,7 @@
     python scripts/make_sample_data.py            # writes ./sample_data
     python scripts/make_sample_data.py /some/dir
 
-The data contains things worth investigating: a vendor redelivery, a retried run, a backfill,
+Every company, identifier and price is invented. The data contains things worth investigating: a vendor redelivery, a retried run, a backfill,
 securities dropped by filter rules, and a position that fails its join because a SEDOL lost
 its leading zero.
 """
@@ -20,17 +20,19 @@ VENDOR_COLUMNS = ["VendorId", "ISIN", "SEDOL", "SecurityName", "AssetType", "Exc
                   "Status", "ClosePrice", "Ccy", "MaturityDate", "Coupon"]
 # VendorId, ISIN, SEDOL, name, asset type, exchange, primary, status, price, currency, maturity, coupon
 STORY = [
-    ("V0001", "GB0002634946", "0263494", "BAE Systems PLC", "EQ", "XLON", "Y", "ACTIVE", "1312.50000", "GBX", "", ""),
-    ("V0002", "US0846707026", "2073390", "Berkshire Hathaway, Inc.", "EQ", "XNYS", "Y", "ACTIVE", "452.11000", "USD", "", ""),
-    ("V0003", "GB00B03MLX29", "B03MLX2", "Shell PLC", "EQ", "XLON", "Y", "ACTIVE", "2710.00000", "GBX", "", ""),
-    ("V0003", "GB00B03MLX29", "B03MLX2", "Shell PLC", "EQ", "XAMS", "N", "ACTIVE", "31.95500", "EUR", "", ""),
-    ("V0004", "GB0007980591", "0798059", "BP PLC", "EQ", "XLON", "Y", "DELISTED", "0.00000", "GBX", "", ""),
-    ("V0005", "XS1234567890", "BF4KX01", "Acme Finance 4.5% 2031\n(guaranteed notes)", "BD", "XLON", "Y", "ACTIVE", "98.76543", "GBP", "2031-06-30", "4.5"),
-    ("V0006", "XS0987654321", "B1YW440", "Old Bond 3% 2025", "BD", "XLON", "Y", "ACTIVE", "100.00000", "GBP", "2025-01-15", "3.0"),
-    ("V0007", "GB00BYZ0WQ12", "BYZ0WQ1", "Gold Warrant Series A", "WT", "XLON", "Y", "ACTIVE", "0.42000", "GBP", "", ""),
+    ("V0001", "GB0004173829", "0417382", "Halvorsen Aerospace PLC", "EQ", "XLON", "Y", "ACTIVE", "1312.50000", "GBX", "", ""),
+    ("V0002", "US5128471093", "2619045", "Larkspur Holdings, Inc.", "EQ", "XNYS", "Y", "ACTIVE", "452.11000", "USD", "", ""),
+    ("V0003", "GB00B7K2MN41", "B7K2MN4", "Tidewater Energy PLC", "EQ", "XLON", "Y", "ACTIVE", "2710.00000", "GBX", "", ""),
+    ("V0003", "GB00B7K2MN41", "B7K2MN4", "Tidewater Energy PLC", "EQ", "XAMS", "N", "ACTIVE", "31.95500", "EUR", "", ""),
+    ("V0004", "GB0006291573", "0629157", "Corbel Mining PLC", "EQ", "XLON", "Y", "DELISTED", "0.00000", "GBX", "", ""),
+    ("V0005", "XS2048815523", "BF8QT61", "Marlow Finance 4.5% 2031\n(guaranteed notes)", "BD", "XLON", "Y", "ACTIVE", "98.76543", "GBP", "2031-06-30", "4.5"),
+    ("V0006", "XS1190347765", "B2LX907", "Old Quay 3% 2025", "BD", "XLON", "Y", "ACTIVE", "100.00000", "GBP", "2025-01-15", "3.0"),
+    ("V0007", "GB00BWRT0A19", "BWRT0A1", "Brightwater Warrant Series A", "WT", "XLON", "Y", "ACTIVE", "0.42000", "GBP", "", ""),
     ("V0008", "", "0000001", "Unidentified Holding", "EQ", "XLON", "Y", "ACTIVE", "1.00000", "GBP", "", ""),
 ]
-LATE_ADDITION = ("V0009", "GB00BLATE001", "0045614", "Late Listing PLC", "EQ", "XLON", "Y", "ACTIVE", "77.70000", "GBX", "", "")
+SECTORS = {"GB0004173829": "Aerospace & Defence", "US5128471093": "Financials", "GB00B7K2MN41": "Energy",
+           "GB00BPNDL008": "Technology"}
+LATE_ADDITION = ("V0009", "GB00BPNDL008", "0058213", "Pendle Robotics PLC", "EQ", "XLON", "Y", "ACTIVE", "77.70000", "GBX", "", "")
 
 
 def filler(count: int, seed: int) -> list[tuple]:
@@ -66,7 +68,8 @@ def security_master(root: Path, bdate: str, run: str, vendor: list[tuple], vendo
     suffix = "_BF" if backfill else ""
     write(base / "02_normalised" / f"sm_normalised_{bdate}_{run}{suffix}.csv", columns, [list(r.values()) for r in normalised])
     iso = f"{bdate[:4]}-{bdate[4:6]}-{bdate[6:]}"
-    equity = [dict(r, sector="Industrials" if i % 2 else "Energy") for i, r in enumerate(normalised) if r["asset_class"] == "EQUITY"]
+    equity = [dict(r, sector=SECTORS.get(r["isin"], "Industrials" if i % 2 else "Consumer Goods"))
+              for i, r in enumerate(normalised) if r["asset_class"] == "EQUITY"]
     bonds = [r for r in normalised if r["asset_class"] == "BOND" and r["maturity_date"] >= iso]
     write(base / "03a_equity_enriched" / f"sm_equity_{bdate}_{run}.csv", columns + ["sector"], [list(r.values()) for r in equity])
     write(base / "03b_fixed_income_enriched" / f"sm_fi_{bdate}_{run}.csv", columns, [list(r.values()) for r in bonds])
@@ -81,14 +84,14 @@ def positions(root: Path, bdate: str, run: str, golden: list[dict]) -> None:
     """Apply the rules written in process_maps/eod_positions.yaml and write each stage."""
     base = root / "positions"
     custodian = [
-        ["PF001", "0263494", "1500", "GBP"],
-        ["PF002", "0263494", "250", "GBP"],
-        ["PF001", "2073390", "40", "USD"],
-        ["PF003", "263494", "900", "GBP"],   # leading zero lost upstream: will not join
-        ["PF001", "B03MLX2", "0", "GBP"],    # zero quantity: dropped
-        ["INT01", "B03MLX2", "10000", "GBP"],  # internal portfolio: excluded from client report
-        ["PF002", "BF4KX01", "200000", "GBP"],
-        ["PF001", "0045614", "75", "GBP"],   # only in the security master after its rerun
+        ["PF001", "0417382", "1500", "GBP"],
+        ["PF002", "0417382", "250", "GBP"],
+        ["PF001", "2619045", "40", "USD"],
+        ["PF003", "417382", "900", "GBP"],   # leading zero lost upstream: will not join
+        ["PF001", "B7K2MN4", "0", "GBP"],    # zero quantity: dropped
+        ["INT01", "B7K2MN4", "10000", "GBP"],  # internal portfolio: excluded from client report
+        ["PF002", "BF8QT61", "200000", "GBP"],
+        ["PF001", "0058213", "75", "GBP"],   # only in the security master after its rerun
     ]
     write(base / "01_custodian_raw" / f"custodian_positions_{bdate}_{run}.csv",
           ["PortfolioCode", "SecurityId", "Quantity", "SettlementCcy"], custodian)
@@ -107,8 +110,7 @@ def positions(root: Path, bdate: str, run: str, golden: list[dict]) -> None:
     write(base / "03b_risk_feed" / f"risk_positions_{bdate}_{run}.csv", columns, enriched)
 
 
-def main() -> None:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "sample_data")
+def build(root: Path) -> None:
     bulk = filler(2000, seed=7)
     # 12 Nov: a normal day.
     golden = security_master(root, "20261112", "20261112T183000", STORY + bulk, "20261112T180200")
@@ -121,6 +123,11 @@ def main() -> None:
     security_master(root, "20261113", "20261113T211500", corrected + [LATE_ADDITION] + bulk, "20261113T204700")
     # A backfill of 2 Nov, run on 13 Nov.
     security_master(root, "20261102", "20261113T220000", STORY + bulk, "20261102T180200", backfill=True)
+
+
+def main() -> None:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "sample_data")
+    build(root)
     print(f"Sample data written to {root}")
 
 
