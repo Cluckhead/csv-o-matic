@@ -7,10 +7,9 @@ import io
 
 import pytest
 
+from conftest import dumps, make_service
 from csv_o_matic.csvscan import ScanControl, iter_records, prefilter_needle
 from csv_o_matic.service import ToolFailure
-
-from conftest import dumps, make_service
 
 A = "stage/a"
 
@@ -47,8 +46,8 @@ def test_mixed_line_endings_match_the_csv_module(chunk):
     got = [r.fields for r in iter_records(io.BytesIO(data), chunk_bytes=chunk, max_record_bytes=1 << 20)]
     assert got == expected
     for needle in ("5", "y", "7"):
-        hits = [r for r in iter_records(io.BytesIO(data), chunk_bytes=chunk, max_record_bytes=1 << 20,
-                                        needle=prefilter_needle(needle, "utf-8"))]
+        hits = list(iter_records(io.BytesIO(data), chunk_bytes=chunk, max_record_bytes=1 << 20,
+                                     needle=prefilter_needle(needle, "utf-8")))
         assert {r.number for r in hits if needle in r.fields} == {i + 1 for i, row in enumerate(expected) if needle in row}
 
 
@@ -76,7 +75,7 @@ def test_wrongly_declared_encoding_is_not_reported_as_absent(env, service):
     row = service.search_across_columns(ScanControl(), A, "cp.csv", "B2", max_rows=5)
     assert row["outcome"] == "match_found"
     # ... and the reverse: a UTF-8 file in a folder declared latin-1.
-    (env[0] / "stage/semi" / "utf8.csv").write_bytes("id;name\nÄ1;x\n".encode("utf-8"))
+    (env[0] / "stage/semi" / "utf8.csv").write_bytes("id;name\nÄ1;x\n".encode())
     out = service.find_security_in_file(ScanControl(), "stage/semi", "utf8.csv", "Ä1", "id")
     assert out["outcome"] == "inconclusive" and "encoding" in " ".join(out["warnings"])
     # A genuinely absent non-ASCII identifier is still confirmed absent.
@@ -154,10 +153,11 @@ def test_bounded_output_keeps_the_evidence_reachable(env):
 
 
 def test_error_responses_are_bounded_too(env):
-    from csv_o_matic.config import Config, Limits
-    from csv_o_matic.server import build_server
     import anyio
     from mcp.client import Client
+
+    from csv_o_matic.config import Config, Limits
+    from csv_o_matic.server import build_server
 
     names = awkward_files(env)
 
@@ -355,7 +355,7 @@ def test_oversized_step_detail_is_cut_not_refused(env):
 
 def test_non_breaking_space_in_a_valid_utf8_file_is_not_an_encoding_problem(env, service):
     """The cp1252 byte for NBSP (A0) is also the second byte of its UTF-8 form: no false alarm."""
-    write(env, "nbsp.csv", "ID,Name\n ,one\nx, \né1,two\n".encode("utf-8"))
+    write(env, "nbsp.csv", "ID,Name\n ,one\nx, \né1,two\n".encode())
     out = service.find_security_in_file(ScanControl(), A, "nbsp.csv", " ", "ID")
     assert out["outcome"] == "match_found" and out["more_matches"] == "none" and "warnings" not in out
     assert service.count_matching_rows(ScanControl(), A, "nbsp.csv", " ", "ID")["count"] == 1

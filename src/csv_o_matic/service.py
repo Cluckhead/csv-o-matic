@@ -13,13 +13,14 @@ import hmac
 import json
 import os
 import secrets
-import threading
 import stat as stat_module
+import threading
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, BinaryIO, Iterator
+from typing import Any, BinaryIO
 
 from .config import Config
 from .csvscan import CsvParseError, Record, ScanControl, iter_records, prefilter_needle
@@ -79,7 +80,7 @@ def _some(names: list[str], max_bytes: int) -> list[str]:
 
 
 def _iso(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat(timespec="seconds")
+    return datetime.fromtimestamp(timestamp, tz=UTC).isoformat(timespec="seconds")
 
 
 @dataclass
@@ -89,7 +90,7 @@ class Header:
     data_offset: int  # byte offset of the first data record
 
     @classmethod
-    def build(cls, columns: list[str], data_offset: int) -> "Header":
+    def build(cls, columns: list[str], data_offset: int) -> Header:
         seen: dict[str, int] = {}
         for name in columns:
             seen[name] = seen.get(name, 0) + 1
@@ -158,6 +159,7 @@ class OpenFile:
     size: int
     mtime_ns: int
     identity: tuple[int, int] = (0, 0)  # (device, inode) of the file that was checked
+    ctime_ns: int = 0
 
     def info(self) -> dict[str, Any]:
         return {
@@ -210,7 +212,7 @@ class _Hints:
             self.spanning_examples.append({"record_number": record.number, "column": _clip(label, 60),
                                            "value_excerpt": value[max(at - 30, 0): at + len(self.identifier) + 30]})
 
-    def filtered_out(self, record: Record, header: "Header", filters: list[tuple[int, str]]) -> None:
+    def filtered_out(self, record: Record, header: Header, filters: Sequence[tuple[int, str]]) -> None:
         """The identifier matched, but the same row does not satisfy every record-key filter."""
         self.filtered += 1
         if len(self.filtered_examples) < 3:
@@ -445,18 +447,18 @@ class Service:
         next_offset = None
         for index in range(max(offset, 0), len(refs)):
             ref = refs[index]
-            descriptions = list(dict.fromkeys(folder.description for _, folder in ref.usages))
+            descriptions = list(dict.fromkeys(declared.description for _, declared in ref.usages))
             usages = []
-            for owner, folder in ref.usages:
+            for owner, declared in ref.usages:
                 steps = [
                     {"step_id": s.id, "step_name": s.name, "role": role}
                     for s in owner.steps
                     for role, ids in (("reads", s.reads), ("writes", s.writes))
-                    if folder.id in ids
+                    if declared.id in ids
                 ]
-                usage: dict[str, Any] = {"process_id": owner.id, "folder_id": folder.id, "steps": steps}
+                usage: dict[str, Any] = {"process_id": owner.id, "folder_id": declared.id, "steps": steps}
                 if len(descriptions) > 1:
-                    usage["description"] = folder.description  # each process describes it differently
+                    usage["description"] = declared.description  # each process describes it differently
                 usages.append(usage)
             entry: dict[str, Any] = {"folder": ref.path, "kind": "mapped_root"}
             if len(descriptions) == 1:
@@ -560,8 +562,8 @@ class Service:
                 nearest = ref
         return nearest.child(os.path.relpath(path, nearest.resolved))
 
-    def _open(self, folder: str, filename: str) -> OpenFile:
-        ref = self._folder(folder)
+    def _open(self, folder: str, filename: str, catalog: Catalog | None = None) -> OpenFile:
+        ref = self._folder(folder, catalog)
         if (not filename or len(filename) > 255 or filename in (".", "..") or "/" in filename
                 or "\\" in filename or "\x00" in filename):
             raise ToolFailure("invalid_argument", "filename must be a bare file name inside the folder, without any path.")
@@ -596,7 +598,7 @@ class Service:
             raise ToolFailure("file_unreadable", f"Cannot access '{filename}' in '{ref.path}': {exc.strerror or exc}.") from exc
         if not stat_module.S_ISREG(st.st_mode):
             raise ToolFailure("file_unreadable", f"'{filename}' is not a regular file (links and special files are not read).")
-        return OpenFile(ref, path, filename, fmt, st.st_size, st.st_mtime_ns, (st.st_dev, st.st_ino))
+        return OpenFile(ref, path, filename, fmt, st.st_size, st.st_mtime_ns, (st.st_dev, st.st_ino), st.st_ctime_ns)
 
     @staticmethod
     def _open_fd(of: OpenFile) -> int:
@@ -767,47 +769,41 @@ class Service:
                     "This folder has no filename convention with a date token, so filename dates cannot be filtered. "
                     "Use date_field='filesystem_modified' or filename_contains instead.",
                 )
-        try:
-            entries = list(os.scandir(ref.resolved))
-        except OSError as exc:
-            raise ToolFailure("folder_unreadable", f"Cannot list folder '{ref.path}': {exc.strerror or exc}.") from exc
-
-        files: list[dict[str, Any]] = []
+        # Only names are held for the whole folder; sizes and times are read for the page returned.
+        names: list[str] = []
         subfolders: list[str] = []
         ignored = unparseable = 0
         needle = filename_contains.casefold() if filename_contains else None
-        for entry in entries:
-            try:
-                if entry.is_dir(follow_symlinks=False):
-                    subfolders.append(entry.name)
-                    continue
-                if not entry.name.lower().endswith(".csv") or not entry.is_file(follow_symlinks=False):
-                    ignored += 1
-                    continue
-                st = entry.stat(follow_symlinks=False)
-            except OSError:
-                ignored += 1
-                continue
-            if needle and needle not in entry.name.casefold():
-                continue
-            tokens = convention.parse(entry.name) if convention else None
-            item: dict[str, Any] = {
-                "filename": entry.name,
-                "size_bytes": st.st_size,
-                "filesystem_modified_time": _iso(st.st_mtime),
-            }
-            if convention:
-                item["filename_tokens"] = tokens
-                item["matches_filename_convention"] = tokens is not None
-            if field:
-                value = _iso(st.st_mtime) if field == "filesystem_modified" else (tokens or {}).get(field)
-                if value is None:
-                    unparseable += 1
-                    continue
-                if (lo and value[:10] < lo) or (hi and value[:10] > hi):
-                    continue
-            files.append(item)
-        files.sort(key=lambda f: f["filename"], reverse=newest_first)
+        try:
+            with os.scandir(ref.resolved) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            subfolders.append(entry.name)
+                            continue
+                        if not entry.name.lower().endswith(".csv") or not entry.is_file(follow_symlinks=False):
+                            ignored += 1
+                            continue
+                        if needle and needle not in entry.name.casefold():
+                            continue
+                        if field:
+                            value: str | None
+                            if field == "filesystem_modified":
+                                value = _iso(entry.stat(follow_symlinks=False).st_mtime)
+                            else:
+                                value = (convention.parse(entry.name) or {}).get(field) if convention else None
+                            if value is None:
+                                unparseable += 1
+                                continue
+                            if (lo and value[:10] < lo) or (hi and value[:10] > hi):
+                                continue
+                    except OSError:
+                        ignored += 1
+                        continue
+                    names.append(entry.name)
+        except OSError as exc:
+            raise ToolFailure("folder_unreadable", f"Cannot list folder '{ref.path}': {exc.strerror or exc}.") from exc
+        names.sort(reverse=newest_first)
 
         subfolders.sort(reverse=True)
         shown = _some([os.path.join(ref.path, name) for name in subfolders[:SUBFOLDERS_IN_FILE_LISTING]], 1000)
@@ -824,12 +820,26 @@ class Service:
         page: list[dict[str, Any]] = []
         used = 0
         start = max(offset, 0)
-        for item in files[start: start + self.limits.max_files_per_listing]:
+        vanished = 0
+        for name in names[start: start + self.limits.max_files_per_listing]:
+            try:
+                st = os.lstat(ref.resolved / name)
+            except OSError:
+                vanished += 1  # deleted between the listing and the stat
+                continue
+            item: dict[str, Any] = {"filename": name, "size_bytes": st.st_size,
+                                    "filesystem_modified_time": _iso(st.st_mtime)}
+            if convention:
+                tokens = convention.parse(name)
+                item["filename_tokens"] = tokens
+                item["matches_filename_convention"] = tokens is not None
             cost = _size(item)
             if page and used + cost > budget:
                 break
             page.append(item)
             used += cost
+        files = names
+        start += vanished
         more = start + len(page) < len(files)
         out: dict[str, Any] = {
             "folder": ref.path,
@@ -1026,8 +1036,10 @@ class Service:
 
     def _fingerprint(self, tool: str, of: OpenFile, identifier: str, column: int | None,
                      filters: list[tuple[int, str]]) -> str:
-        blob = json.dumps([tool, str(of.path), of.size, of.mtime_ns, of.fmt.delimiter, of.fmt.encoding, identifier,
-                           column, filters])
+        # Bound to the physical file (device, inode, change time) as well as its size and modification
+        # time, so a replacement or in-place rewrite that keeps both still invalidates the cursor.
+        blob = json.dumps([tool, str(of.path), of.size, of.mtime_ns, of.identity, of.ctime_ns, of.fmt.delimiter,
+                           of.fmt.encoding, identifier, column, filters])
         return hashlib.sha256(blob.encode()).hexdigest()[:24]
 
     def _encode_cursor(self, state: dict[str, Any]) -> str:
@@ -1042,7 +1054,7 @@ class Service:
             if not hmac.compare_digest(mac, hmac.new(self._cursor_key, body, hashlib.sha256).digest()[:12]):
                 raise ValueError
             state = json.loads(body)
-        except Exception:
+        except Exception:  # noqa: BLE001 - however a cursor is malformed, the answer is the same
             raise ToolFailure(
                 "invalid_cursor",
                 "The cursor is not valid for this server session (cursors do not survive a server restart). "
@@ -1123,7 +1135,7 @@ class Service:
 
     def _iter_matches(self, fh: BinaryIO, of: OpenFile, header: Header, identifier: str, column: int | None,
                       start_offset: int, start_record: int, control: ScanControl,
-                      hints: _Hints, filters: list[tuple[int, str]] = ()) -> Iterator[tuple[Record, list[int]]]:
+                      hints: _Hints, filters: Sequence[tuple[int, str]] = ()) -> Iterator[tuple[Record, list[int]]]:
         """Yield (record, indices of matching fields) for exact matches, in file order.
 
         With `filters`, a record matches only if it also holds each filter's exact value in that column.
@@ -1212,9 +1224,15 @@ class Service:
 
             fingerprint = self._fingerprint(tool, of, identifier, column_index, row_filters)
             start_offset, start_record, before = header.data_offset, 1, 0
+            # What earlier responses of a cursor chain saw travels in the cursor, so that a clean last
+            # page cannot certify absence or an exact count for a file that an earlier page found unreliable.
+            earlier_alt: list[str] = []
+            earlier_undecodable = earlier_near = False
             if cursor:
                 state = self._decode_cursor(cursor, fingerprint)
                 start_offset, start_record, before = state["o"], state["r"], state["m"]
+                earlier_alt = list(state.get("a", []))
+                earlier_undecodable, earlier_near = bool(state.get("u")), bool(state.get("n"))
                 search["resumed_from_cursor"] = True
                 search["matches_in_earlier_responses"] = before
             if not count_only:
@@ -1259,6 +1277,9 @@ class Service:
             if stop_reason is None and error is None:
                 stop_reason = control.stop_reason
                 resume = (control.resume_offset, control.resume_record)
+            control.alt_hits |= set(earlier_alt)
+            if earlier_undecodable and not control.undecodable_lines:
+                control.undecodable_lines = 1
             warnings, sound, changed = self._integrity(control, of, header, identifier)
 
         reached_end = stop_reason == "end_of_file"
@@ -1291,13 +1312,19 @@ class Service:
         result["outcome"] = outcome
 
         can_resume = error is None and not reached_end and resume is not None and not changed
-        next_cursor = self._encode_cursor({"fp": fingerprint, "o": resume[0], "r": resume[1], "m": total}) if can_resume else None
+        next_cursor = None
+        if can_resume and resume is not None:
+            next_cursor = self._encode_cursor({
+                "fp": fingerprint, "o": resume[0], "r": resume[1], "m": total, "a": sorted(control.alt_hits),
+                "u": int(bool(control.undecodable_lines)), "n": int(bool(hints) or earlier_near)})
         why = error.message if error else STOP_EXPLANATIONS.get(stop_reason or "", "the scan stopped early")
         if reached_end:
             why = "the file could not be read reliably (see warnings)"
         aside = ""
         if not total and hints:
             aside = f" Not exact matches, but worth checking: {hints.sentence()} (see near_misses)."
+        elif not total and reached_end and earlier_near:
+            aside = " Near misses were reported in earlier responses of this cursor chain."
         elif not total and reached_end:
             aside = " No near misses were seen either."
         if records_after_header == 0:
@@ -1397,7 +1424,8 @@ class Service:
         self._check_identifier(identifier_b)
         if match_keys and len(match_keys) > MAX_MATCH_KEYS:
             raise ToolFailure("invalid_argument", f"At most {MAX_MATCH_KEYS} match_keys are supported.")
-        sides = {"a": self._open(folder_a, filename_a), "b": self._open(folder_b, filename_b)}
+        catalog = self.catalog()  # read once, so both files are judged by the same maps
+        sides = {"a": self._open(folder_a, filename_a, catalog), "b": self._open(folder_b, filename_b, catalog)}
         limit = self.limits.max_output_bytes - TOOL_NAME_BYTES
         result: dict[str, Any] = {"file_a": sides["a"].info(), "file_b": sides["b"].info()}
         with self._fh(sides["a"]) as fh_a, self._fh(sides["b"]) as fh_b:
@@ -1447,6 +1475,7 @@ class Service:
                     lookup_b.setdefault(label, i)
                 for i, name in enumerate(head_a.columns):
                     mapped = mapping.get(name, mapping.get(head_a.labels[i])) if counts_a[name] == 1 else mapping.get(head_a.labels[i])
+                    j: int | None
                     if mapped is not None:
                         j = self._column(head_b, mapped, sides["b"])  # an explicit mapping must resolve
                     else:
@@ -1456,6 +1485,12 @@ class Service:
                     else:
                         pairs.append((i, j))
             keys = [pair(name) for name in match_keys] if match_keys else []
+            unused_mapping = []
+            for name in mapping:
+                try:
+                    self._column(head_a, name, sides["a"])
+                except ToolFailure:
+                    unused_mapping.append(_clip(str(name), 80))
             label_a, label_b = head_a.labels, head_b.labels
             used_b = {b for _, b in pairs}
             search: dict[str, Any] = {
@@ -1480,7 +1515,7 @@ class Service:
                     search["compared_column_count"] = len(pairs)
             else:
                 search["compared_columns"] = f"all {len(pairs)} columns of file A with exactly one counterpart in file B"
-                only_b = [l for i, l in enumerate(label_b) if i not in used_b]
+                only_b = [label for i, label in enumerate(label_b) if i not in used_b]
                 result["columns_not_compared"] = {
                     "only_in_file_a_count": len(only_a), "only_in_file_a": _some(only_a, 500),
                     "only_in_file_b_count": len(only_b), "only_in_file_b": _some(only_b, 500),
@@ -1495,6 +1530,9 @@ class Service:
             records: dict[str, list[Record]] = {"a": [], "b": []}
             presence: dict[str, dict[str, Any]] = {}
             warnings: list[str] = []
+            if unused_mapping:
+                warnings.append("column_mapping names column(s) that are not in file A, so those entries had no effect: "
+                                + ", ".join(_some(unused_mapping, 400)) + ". Mapping keys are file A column names.")
             base = 0
             for key, ident in (("a", identifier), ("b", identifier_b)):
                 of, header = sides[key], headers[key]
@@ -1578,7 +1616,7 @@ class Service:
             return _some(names[:20], 500)
 
         def describe(labels: list[str], indices: list[int], values: tuple) -> dict[str, Any]:
-            return {_clip(labels[i], 60): (None if v is None else _clip(v, 80)) for i, v in zip(indices, values)}
+            return {_clip(labels[i], 60): (None if v is None else _clip(v, 80)) for i, v in zip(indices, values, strict=True)}
 
         omitted = {"comparisons": 0, "ambiguous_keys": 0, "unmatched_records_in_file_a": 0, "unmatched_records_in_file_b": 0}
 
@@ -1709,6 +1747,11 @@ class Service:
                 text = (f"{compared} record pair(s) compared; {differing} have at least one differing value. Some "
                         f"records could not be paired: {ambiguous} ambiguous key(s), {only_in_a} record(s) only in "
                         f"file A, {only_in_b} only in file B.")
+            elif not pairs:
+                status = "no_comparable_columns"
+                text = (f"Complete scans: {subject} is in both files ({compared} record pair(s)), but NO VALUES WERE "
+                        "COMPARED: no column of file A has a counterpart in file B. Columns are paired by identical "
+                        "name; give column_mapping (file A name -> file B name) for columns named differently.")
             else:
                 status = "compared"
                 text = (f"Complete scans: {compared} record pair(s) compared; {differing} pair(s) have at "

@@ -1,0 +1,63 @@
+id: corporate_actions
+name: Corporate Actions
+description: Filters the vendor corporate action announcements down to confirmed events.
+purpose: >
+  Takes the vendor's daily corporate action announcements and publishes the confirmed events
+  that the positions and pricing teams apply.
+schedule: 19:00
+run_semantics: >
+  Every run writes new files. The business date in a filename is the announcement date; the run
+  timestamp is the UTC time the step started. A second file for the same business date is a
+  rerun and supersedes the earlier one.
+
+folders:
+  - id: announcements
+    path: corporate_actions/01_announcements
+    description: Vendor announcements as delivered. One row per security and event.
+    filename_convention:
+      pattern: "ca_{business_date}_{run_timestamp}.csv"
+      regex: '^ca_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "Announcement date"}
+        run_ts: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the delivery was received"}
+    identifier_columns:
+      - {column: ISIN, identifier_type: ISIN}
+      - {column: SEDOL, identifier_type: SEDOL, notes: "7 characters, may start with zeroes"}
+    record_key_columns: [ISIN, EventType, ExDate]
+
+  - id: confirmed
+    path: corporate_actions/02_confirmed
+    description: Confirmed corporate actions. One row per security and event.
+    filename_convention:
+      pattern: "ca_confirmed_{business_date}_{run_timestamp}.csv"
+      regex: '^ca_confirmed_(?P<business_date>\d{8})_(?P<run_timestamp>\d{8}T\d{6})\.csv$'
+      tokens:
+        business_date: {format: "%Y%m%d", meaning: "Announcement date"}
+        run_timestamp: {format: "%Y%m%dT%H%M%S", timezone: UTC, meaning: "When the confirm step started"}
+    identifier_columns:
+      - {column: isin, identifier_type: ISIN}
+      - {column: sedol, identifier_type: SEDOL}
+    record_key_columns: [isin, event_type, ex_date]
+
+steps:
+  - id: receive
+    name: Receive announcements
+    description: Lands the vendor file unchanged.
+    writes: [announcements]
+    downstream: [confirm]
+
+  - id: confirm
+    name: Keep confirmed events
+    description: Drops unconfirmed events and standardises column names.
+    reads: [announcments]
+    writes: [confirmed]
+    field_mappings:
+      - {from_folder: announcements, from_column: ISIN, to_folder: confirmed, to_column: isin}
+      - {from_folder: announcements, from_column: SEDOL, to_folder: confirmed, to_column: sedol}
+      - {from_folder: announcements, from_column: EventType, to_folder: confirmed, to_column: event_type}
+      - {from_folder: announcements, from_column: ExDate, to_folder: confirmed, to_column: ex_date}
+      - {from_folder: announcements, from_column: Ratio, to_folder: confirmed, to_column: ratio}
+    transformation_rules:
+      - "Reads only the latest run_timestamp of announcements for the business date."
+    filter_rule:
+      - "Rows where Status is not 'CONFIRMED' are dropped."

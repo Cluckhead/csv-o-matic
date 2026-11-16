@@ -280,13 +280,13 @@ def test_other_encoding_hits_only_count_when_the_chunk_reads_as_that_encoding():
         list(iter_records(io.BytesIO(data), encoding=declared, needle=b"zzz", control=control))
         return control.alt_hits
 
-    nbsp_cp1252, nbsp_utf8 = " ".encode("cp1252"), " ".encode("utf-8")
+    nbsp_cp1252, nbsp_utf8 = " ".encode("cp1252"), " ".encode()
     # Declared utf-8: the cp1252 byte inside a valid UTF-8 file is a coincidence ...
-    assert hits("a,b\n ,x\n".encode("utf-8"), "utf-8", {"cp1252": nbsp_cp1252}) == set()
+    assert hits("a,b\n ,x\n".encode(), "utf-8", {"cp1252": nbsp_cp1252}) == set()
     # ... but in a file that is not valid UTF-8 it is evidence.
     assert hits("a,b\n ,é\n".encode("cp1252"), "utf-8", {"cp1252": nbsp_cp1252}) == {"cp1252"}
     # Declared latin-1: UTF-8 bytes count only if the chunk really is UTF-8.
-    assert hits("a,b\n ,x\n".encode("utf-8"), "latin-1", {"utf-8": nbsp_utf8}) == {"utf-8"}
+    assert hits("a,b\n ,x\n".encode(), "latin-1", {"utf-8": nbsp_utf8}) == {"utf-8"}
     assert hits(b"a,b\n\xc2\xa0,\xe9\n", "latin-1", {"utf-8": nbsp_utf8}) == set()
     # Two single-byte encodings cannot be told apart by validity: a hit always counts.
     assert hits(b"a,b\n\x801,x\n", "latin-1", {"cp1252": b"\x801"}) == {"cp1252"}

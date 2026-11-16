@@ -6,8 +6,9 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Callable
 from functools import partial
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any
 
 import anyio
 import anyio.to_thread
@@ -15,8 +16,8 @@ from mcp import types
 from mcp.server.mcpserver import Context, MCPServer
 from pydantic import Field
 
-from .config import Config, ConfigError, load_config
 from . import schemas
+from .config import Config, ConfigError, load_config
 from .csvscan import ScanControl
 from .service import Service, ToolFailure
 
@@ -127,9 +128,12 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
             return {"tool": tool, **fn()}, False
         except ToolFailure as failure:
             error = {"type": failure.kind, "message": failure.message, **failure.details}
-        except Exception as exc:  # noqa: BLE001 - report, never crash the session
+        except Exception as exc:
             log.exception("%s failed", tool)
-            error = {"type": "internal_error", "message": f"{type(exc).__name__}: {exc}"}
+            # The exception's own text stays in the server log: it can hold paths or file contents.
+            error = {"type": "internal_error",
+                     "message": f"An unexpected {type(exc).__name__} occurred in the server; details are in its log. "
+                                "Nothing can be concluded from this call."}
         payload: dict[str, Any] = {"tool": tool}
         if tool in SEARCH_TOOLS:
             payload["outcome"] = "inconclusive"
@@ -164,7 +168,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                                f"{control.elapsed:.0f}s of {budget:.0f}s allowed")
                 try:
                     await ctx.report_progress(control.bytes_base + control.bytes_done, control.total_bytes or None, message)
-                except Exception:  # noqa: BLE001 - progress is best-effort
+                except Exception:
                     log.debug("progress notification failed", exc_info=True)
 
         outcome: list[tuple[dict[str, Any], bool]] = []
@@ -244,7 +248,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         Optional filename and date filters narrow the listing. Only files directly in the folder are listed;
         its subfolders are named in `subfolders` and must be listed separately."""
         request = {"folder": folder, "filename_contains": filename_contains, "date_from": date_from,
-                   "date_to": date_to, "date_field": date_field, "offset": offset}
+                   "date_to": date_to, "date_field": date_field, "offset": offset, "newest_first": newest_first}
         return await quick("list_csv_files", request, lambda: service.list_csv_files(
             folder, filename_contains, date_from, date_to, date_field, offset, newest_first))
 
@@ -297,7 +301,8 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         (e.g. this ISIN in this portfolio): confirmed_absent then means no row has the identifier together
         with every filter value."""
         request = {"folder": folder, "filename": filename, "identifier": identifier,
-                   "identifier_column": identifier_column, "filters": filters, "columns": columns, "max_rows": max_rows}
+                   "identifier_column": identifier_column, "filters": filters, "columns": columns, "max_rows": max_rows,
+                   "cursor": cursor, "max_scan_seconds": max_scan_seconds}
         return await scan(ctx, "find_security_in_file", request, max_scan_seconds, lambda control:
                           service.find_security_in_file(control, folder, filename, identifier, identifier_column,
                                                         columns, max_rows, cursor, filters))
@@ -319,7 +324,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         (matched columns are always included in the returned values). With `filters`, the identifier must
         match at least one column of a row that also satisfies every filter."""
         request = {"folder": folder, "filename": filename, "identifier": identifier, "filters": filters,
-                   "columns": columns, "max_rows": max_rows}
+                   "columns": columns, "max_rows": max_rows, "cursor": cursor, "max_scan_seconds": max_scan_seconds}
         return await scan(ctx, "search_across_columns", request, max_scan_seconds, lambda control:
                           service.search_across_columns(control, folder, filename, identifier, columns, max_rows,
                                                         cursor, filters))
@@ -340,7 +345,8 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         count_is_exact is false, and next_cursor (when present) continues the count. With `filters`, only
         rows that also satisfy every filter are counted."""
         request = {"folder": folder, "filename": filename, "identifier": identifier,
-                   "identifier_column": identifier_column, "filters": filters}
+                   "identifier_column": identifier_column, "filters": filters, "cursor": cursor,
+                   "max_scan_seconds": max_scan_seconds}
         return await scan(ctx, "count_matching_rows", request, max_scan_seconds, lambda control:
                           service.count_matching_rows(control, folder, filename, identifier, identifier_column,
                                                       cursor, filters))
@@ -382,7 +388,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
                    "identifier": identifier, "identifier_column_a": identifier_column_a,
                    "identifier_column_b": identifier_column_b, "identifier_b": identifier_b,
                    "compare_columns": compare_columns, "column_mapping": column_mapping, "match_keys": match_keys,
-                   "filters": filters, "filters_b": filters_b}
+                   "filters": filters, "filters_b": filters_b, "max_scan_seconds": max_scan_seconds}
         return await scan(ctx, "compare_security_records", request, max_scan_seconds, lambda control:
                           service.compare_security_records(control, folder_a, filename_a, folder_b, filename_b,
                                                            identifier, identifier_column_a, identifier_column_b,
@@ -401,10 +407,10 @@ def _bounded(value: Any) -> Any:
         return head if len(value) <= 5 else head + [f"...and {len(value) - 5} more"]
     if isinstance(value, dict):
         items = list(value.items())
-        head = {_bounded(k): _bounded(v) for k, v in items[:5]}
+        some = {_bounded(k): _bounded(v) for k, v in items[:5]}
         if len(items) > 5:
-            head["..."] = f"and {len(items) - 5} more"
-        return head
+            some["..."] = f"and {len(items) - 5} more"
+        return some
     return value
 
 

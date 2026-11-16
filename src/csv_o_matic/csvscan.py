@@ -27,8 +27,9 @@ import csv
 import re
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import BinaryIO, Iterator
+from typing import BinaryIO
 
 UTF8_BOM = b"\xef\xbb\xbf"
 
@@ -158,12 +159,12 @@ class _Lines:
         self.pos = 0
         self.overrun = False  # csv.reader wanted a line beyond those available
 
-    def start(self, pos: int) -> "_Lines":
+    def start(self, pos: int) -> _Lines:
         self.pos = pos
         self.overrun = False
         return self
 
-    def __iter__(self) -> "_Lines":
+    def __iter__(self) -> _Lines:
         return self
 
     def __next__(self) -> str:
@@ -219,7 +220,7 @@ def iter_records(
             fh.seek(0)
     rec_no = start_record
     carry = b""
-    first_read = True
+    began_at = offset
     read_size = chunk_bytes
 
     def too_long() -> CsvParseError:
@@ -239,12 +240,13 @@ def iter_records(
         if eof and not carry:
             break  # everything has been read: the scan is complete whatever the clock says
         reason = control.interruption()
-        # The time limit is not applied to the first read, so every call makes progress and a
-        # chain of cursors always terminates. Cancellation is honoured at once.
-        if reason == "cancelled" or (reason and not first_read):
+        # The time limit is not applied until the scan has got past at least one record: reading a
+        # chunk is not progress if the record it belongs to is still incomplete. So every call ends
+        # at a later record boundary than it began, and a chain of cursors always terminates. The
+        # extra reading this allows is bounded by max_record_bytes. Cancellation is honoured at once.
+        if reason == "cancelled" or (reason and offset > began_at):
             control.stop_reason, control.resume_offset, control.resume_record = reason, offset, rec_no
             return
-        first_read = False
         buf = carry + chunk if carry else chunk
         if eof:
             body, carry = buf, b""
@@ -289,7 +291,7 @@ def iter_records(
         while pos < n:
             if skipping:
                 if hit != -1 and hit < pos:
-                    hit = body.find(needle, pos)
+                    hit = body.find(needle, pos)  # type: ignore[arg-type]  # skipping implies a needle
                 if quote != -1 and quote < pos:
                     quote = body.find(b'"', pos)
                 if hit == -1 and quote == -1:
@@ -313,7 +315,7 @@ def iter_records(
             parsed += 1
             if not parsed & 0x3FF:  # a chunk full of candidates takes a while: stay responsive
                 reason = control.interruption()
-                if reason:
+                if reason and (reason == "cancelled" or offset + pos > began_at):
                     control.bytes_done = offset + pos
                     control.stop_reason, control.resume_offset, control.resume_record = reason, offset + pos, rec_no
                     return
