@@ -9,8 +9,9 @@ look at, searches them for the security, and explains what it finds. The server'
 return accurate, bounded evidence about the files it is asked about. Choosing files and
 interpreting results is left to the LLM.
 
-- **Read-only.** Files are only ever opened for reading. Only regular `.csv` files directly
-  inside folders named in a process map can be reached; links are never followed.
+- **Read-only.** Files are only ever opened for reading. Only regular `.csv` files inside
+  folders named in a process map, or inside real subfolders of those folders, can be reached;
+  links are never followed.
 - **No database, no index, no cache.** Process maps are re-read on every request; folder
   listings and CSV data are read from disk on demand.
 - **Built for multi-gigabyte files.** Files are streamed in fixed-size chunks. Memory use does
@@ -101,7 +102,8 @@ folders:
       notes: Optional.
     identifier_columns:
       - {column: SEDOL, identifier_type: SEDOL, notes: "7 characters, may start with zeroes"}
-    record_key_columns: [ISIN, ExchangeCode]  # what identifies one record for a security
+    record_key_columns: [ISIN, ExchangeCode]  # what identifies one record for a security;
+                                              # reported to the LLM as the usual `filters`
     csv_format: {delimiter: ",", encoding: utf-8}   # optional; these are the defaults
 
 steps:
@@ -124,6 +126,29 @@ in each map; the folder inventory merges them by physical path. Only maps that s
 `csv_format` for the folder have a say in it; if two maps state different formats, files in
 that folder are refused with a `process_map_conflict` error until the maps agree.
 
+### Subfolders
+
+A mapped folder is an approved root: the files directly in it and in its subfolders, to any
+depth, can be listed and read. Nothing needs declaring for that. A layout such as
+`positions/02_enriched/2026/11/15/positions_enriched_....csv` works with only
+`positions/02_enriched` in the map.
+
+- A subfolder is addressed as `<mapped folder>/<sub>/<path>`, exactly as `list_folders` and
+  `list_csv_files` return it, and is used as the `folder` argument of every tool.
+- Files in a subfolder take the mapped folder's `csv_format`, `filename_convention`,
+  `identifier_columns` and `record_key_columns`. To give a subfolder different settings, map
+  it as a folder in its own right; the nearest mapped folder above a file is the one that
+  applies.
+- The mapped folder is the boundary. A `folder` argument is only ever resolved against the
+  mapped folders, never against the filesystem at large. Each component below the mapped
+  folder must be a real directory: a symbolic link is refused (`folder_not_allowed`), whether
+  it points outside or back inside, and so is any path containing `..`. Parent and sibling
+  directories of a mapped folder do not exist as far as the server is concerned.
+- Discovery is one level per call and never recursive. `list_csv_files` lists only the files
+  directly in the folder it is given and names that folder's subfolders; `list_folders` with
+  `folder=` pages through them. Searching a folder tree means the LLM choosing folders, the
+  same way it chooses files.
+
 Every file is assumed to have a header row. A folder of headerless files cannot be declared;
 searching one gives a warning (and no "absent") when the value searched for is in the first
 row, but the first row is otherwise treated as column names.
@@ -135,14 +160,49 @@ Supported encodings: `utf-8` (a byte-order mark is ignored), `ascii`, `latin-1`,
 | Tool | Purpose |
 | --- | --- |
 | `get_process_map` | List processes, or return one process's full map (or one step with `step_id`) |
-| `list_folders` | Folder inventory from the maps: path, description, steps that read/write it |
-| `list_csv_files` | Actual files in a folder: name, size, modification time, parsed filename dates; filename and date filters |
+| `list_folders` | Folder inventory from the maps: path, description, steps that read/write it, identifier and record-key columns. With `folder`, the immediate subfolders of that folder |
+| `list_csv_files` | Actual files in a folder or subfolder: name, size, modification time, parsed filename dates; filename and date filters; names of its subfolders |
 | `inspect_csv_headers` | Column names in original order; optional small sample of leading rows |
 | `search_column_names` | Find columns by name fragment without fetching the whole header |
-| `find_security_in_file` | Rows where a chosen column equals an identifier exactly; whole row or chosen columns |
-| `search_across_columns` | Rows where any column equals the identifier; names every matching column |
-| `count_matching_rows` | Exact count of matching rows, without row contents |
-| `compare_security_records` | Find a security in two files and compare fields, with column mappings and match keys |
+| `find_security_in_file` | Rows where a chosen column equals an identifier exactly; whole row or chosen columns; optional `filters` |
+| `search_across_columns` | Rows where any column equals the identifier; names every matching column; optional `filters` |
+| `count_matching_rows` | Exact count of matching rows, without row contents; optional `filters` |
+| `compare_security_records` | Find a security in two files and compare fields, with column mappings, match keys and `filters` |
+
+### Asking about one record: `filters`
+
+An identifier on its own often matches many rows: one ISIN held by a hundred portfolios. The
+four search tools take an optional `filters` argument, an object of column -> exact value, to
+ask about one record:
+
+```json
+{"folder": "positions/02_enriched", "filename": "positions_enriched_20261115_20261115T200000.csv",
+ "identifier": "GB1234567890", "identifier_column": "isin",
+ "filters": {"portfolio_code": "ABC"}}
+```
+
+- A row matches only if it holds the identifier **and** every filter value, all in that same
+  row. Filter values are compared like identifiers: whole field, case-sensitive, as text, so
+  `00042` is not `42`.
+- Any column can be a filter, by exact name or `#<position>`. The folder's
+  `record_key_columns` (in `list_folders`, `list_csv_files` and `get_process_map`) say which
+  columns normally pin down one record.
+- `match_found`, `confirmed_absent`, `count` and partial results all refer to the complete
+  condition. `confirmed_absent` with a filter means no row has the identifier together with
+  the filter values; the identifier may well be elsewhere in the file. When it is,
+  `near_misses.identifier_matched_but_filters_did_not` gives the count and shows what the
+  filter columns hold in those rows.
+- In `search_across_columns` the identifier may be in any column of a row that satisfies the
+  filters.
+- `compare_security_records` takes `filters` by file A's column names and applies them to both
+  files, translating names through `column_mapping`. `filters_b` replaces them for file B when
+  its columns or values differ (`{}` for no filter on file B). Filtering to one record per file
+  is the simplest way to avoid an ambiguous comparison.
+- Every response reports the filters as applied (`search.filters`, or `search.filters_a` /
+  `filters_b`), with an empty list when none were given. Cursors are tied to the filters: a
+  cursor from one filtered search is refused for another.
+- A filter naming a missing or repeated column, the identifier column itself, the same column
+  twice, or a non-text value is an error and nothing is searched. At most 10 filters.
 
 ### How to read results
 
@@ -205,6 +265,25 @@ automatically; compare such columns explicitly by position.
 `filesystem_modified_time` is when a file was last written on disk. Business dates and run
 timestamps come only from the filename, parsed with the folder's convention, and are returned
 separately as `filename_tokens`.
+
+### Structured output
+
+Each tool publishes an MCP output schema and returns every response twice with identical
+content: as `structuredContent` conforming to that schema, and as the JSON text that was always
+returned. Clients that read only text see no change. The schemas are defined in
+[`src/csv_o_matic/schemas.py`](src/csv_o_matic/schemas.py).
+
+- Failures have the same structure as successes: `error` (`type`, `message`, details) and
+  `request` (the arguments as received), with `isError` set. The four search tools add
+  `outcome: "inconclusive"`, so a failed call can never be read as "absent".
+- A field that does not apply to a response is absent. A value that is unavailable is `null`:
+  `count` after an interrupted scan, `next_cursor` when there is nothing to continue.
+- The same shapes are used throughout: `file` (folder, mapped root, name, size, modified
+  time), `search` (what was applied, including filters), `scan` (complete or not, why it
+  stopped, where), rows (`record_number`, `byte_offset`, `values`), `warnings`, `near_misses`.
+- The schemas are open: fields may be added, and a client should ignore ones it does not know.
+- `max_output_bytes` applies to each representation separately, so a response on the wire is
+  up to about twice that. Truncation, cursors and partial-result markers are identical in both.
 
 ### Limits, progress and cancellation
 
@@ -275,9 +354,9 @@ Problems are reported, not guessed around:
 - Rows with more or fewer fields than the header are returned with a `field_count_mismatch`
   note.
 
-Folders are flat: `list_csv_files` lists regular `*.csv` files directly inside a mapped folder.
-Other files, links and subfolders are neither listed nor read, and compressed data is refused
-even under a `.csv` name.
+`list_csv_files` lists regular `*.csv` files directly inside the folder it is given, and names
+that folder's subfolders (see [Subfolders](#subfolders)). Other files and links are neither
+listed nor read, and compressed data is refused even under a `.csv` name.
 
 ## Verification
 
@@ -307,6 +386,13 @@ duplicate matches, wide headers, truncation with cursor paging, unsuccessful sea
 columns, time limits, cancellation, ambiguous comparisons, the concurrency cap under
 cancellation, and that source files are byte-for-byte unchanged.
 
+`tests/test_enhancements.py` covers record filters, subfolders and structured output on a
+positions process nested by date, with one ISIN in a hundred portfolios: same-row filtering in
+search, count and comparison, filtered cursors and interrupted scans, escape attempts through
+`..`, absolute paths and symbolic links, and an end-to-end investigation over MCP that uses
+structured content only. Every response produced anywhere in the suite, failures included, is
+validated against its tool's output schema with unknown fields disallowed.
+
 The acceptance script generates a 120-column file of the requested size and checks results,
 peak memory, time-limit behaviour, cancellation latency and that the file is untouched.
 Measured on a 4-core cloud VM with the file in the page cache (2 GB files):
@@ -328,6 +414,7 @@ src/csv_o_matic/
   process_maps.py  process map schema, validation, folder inventory
   csvscan.py       streaming CSV reader
   service.py       the nine tools as plain functions
+  schemas.py       output schemas: the typed shape of every tool's response
   server.py        MCP wiring: tool definitions, progress, cancellation, concurrency
 process_maps/      example process maps
 docs/field-guide.html  guide to the tools (refresh examples: scripts/build_guide.py --guide docs/field-guide.html;

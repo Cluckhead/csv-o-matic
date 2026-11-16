@@ -28,6 +28,10 @@ from .process_maps import Catalog, CsvFormat, FolderRef, ProcessMap, load_catalo
 MATCH_TYPE = "exact: whole field value, case-sensitive, compared as text"
 MAX_IDENTIFIER_CHARS = 200
 MAX_MATCH_KEYS = 10
+MAX_FILTERS = 10
+MAX_FOLDER_CHARS = 1024
+MAX_SUBFOLDER_DEPTH = 32
+SUBFOLDERS_IN_FILE_LISTING = 50
 LABEL_MAX_CHARS = 200  # longer column names are shown shortened
 ENVELOPE_RESERVE_BYTES = 3_500  # for listings: room for everything in a response other than the items
 SCAN_RESERVE_BYTES = 2_800  # for searches: room for scan status, explanation, cursor and warnings
@@ -158,6 +162,7 @@ class OpenFile:
     def info(self) -> dict[str, Any]:
         return {
             "folder": self.ref.path,
+            "mapped_root": self.ref.mapped_root,
             "filename": self.name,
             "size_bytes": self.size,
             "filesystem_modified_time": _iso(self.mtime_ns / 1e9),
@@ -181,6 +186,8 @@ class _Hints:
         self.spanning_examples: list[dict[str, Any]] = []
         self.padded_examples: list[dict[str, Any]] = []
         self.longer_examples: list[dict[str, Any]] = []
+        self.filtered = 0
+        self.filtered_examples: list[dict[str, Any]] = []
 
     def value(self, record: Record, label: str, value: str) -> None:
         """A value in a searched column that is not equal to the identifier."""
@@ -203,6 +210,16 @@ class _Hints:
             self.spanning_examples.append({"record_number": record.number, "column": _clip(label, 60),
                                            "value_excerpt": value[max(at - 30, 0): at + len(self.identifier) + 30]})
 
+    def filtered_out(self, record: Record, header: "Header", filters: list[tuple[int, str]]) -> None:
+        """The identifier matched, but the same row does not satisfy every record-key filter."""
+        self.filtered += 1
+        if len(self.filtered_examples) < 3:
+            fields = record.fields
+            self.filtered_examples.append({
+                "record_number": record.number,
+                "values": {_clip(header.label(i), 60): (_clip(fields[i], 80) if i < len(fields) else None)
+                           for i, _ in filters}})
+
     def other_column(self, label: str) -> None:
         """The exact identifier, in a column other than the one searched."""
         key = _clip(label, 60)
@@ -210,10 +227,12 @@ class _Hints:
             self.elsewhere[key] = self.elsewhere.get(key, 0) + 1
 
     def __bool__(self) -> bool:
-        return bool(self.padded or self.longer or self.elsewhere or self.spanning)
+        return bool(self.padded or self.longer or self.elsewhere or self.spanning or self.filtered)
 
     def sentence(self) -> str:
         parts = []
+        if self.filtered:
+            parts.append(f"{self.filtered} record(s) have the identifier but do not satisfy the filters")
         if self.elsewhere:
             parts.append("the exact value appears in other column(s): " + ", ".join(self.elsewhere))
         if self.padded:
@@ -228,6 +247,13 @@ class _Hints:
     def as_dict(self, examples: bool = True) -> dict[str, Any]:
         out: dict[str, Any] = {"note": "Seen in the part of the file scanned. These are NOT exact matches "
                                        "and are not counted or returned as matches."}
+        if self.filtered:
+            out["identifier_matched_but_filters_did_not"] = {
+                "count": self.filtered,
+                "meaning": "Records where the identifier matched exactly but at least one filter column held "
+                           "a different value. 'values' shows what the filter columns hold in those records."}
+            if examples:
+                out["identifier_matched_but_filters_did_not"]["examples"] = self.filtered_examples
         if self.elsewhere:
             out["exact_value_in_other_columns"] = self.elsewhere
         if self.padded:
@@ -327,8 +353,90 @@ class Service:
             "Call get_process_map again with step_id for one step's mappings, rules and folders.",
         }
 
-    def list_folders(self, process: str | None = None, offset: int = 0) -> dict[str, Any]:
+    def _folder_metadata(self, ref: FolderRef) -> dict[str, Any]:
+        """What the process maps say about a folder's contents; subfolders inherit it from their mapped root."""
+        out: dict[str, Any] = {}
+        convention = ref.filename_convention
+        if convention:
+            out["filename_pattern"] = convention.pattern
+        identifiers: dict[str, str | None] = {}
+        for _, folder in ref.usages:
+            for column in folder.identifier_columns:
+                identifiers.setdefault(column.column, column.identifier_type)
+        if identifiers:
+            out["identifier_columns"] = [
+                {"column": name, "identifier_type": kind} if kind else {"column": name}
+                for name, kind in identifiers.items()]
+        if ref.record_key_columns:
+            out["record_key_columns"] = ref.record_key_columns
+        return out
+
+    def _list_subfolders(self, catalog: Catalog, folder: str, offset: int) -> dict[str, Any]:
+        """The immediate subfolders of one approved folder. Never recursive: one level per call."""
+        ref = self._folder(folder, catalog)
+        try:
+            names, links = [], 0
+            with os.scandir(ref.resolved) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        names.append(entry.name)
+                    elif entry.is_symlink():
+                        links += 1
+        except OSError as exc:
+            raise ToolFailure("folder_unreadable", f"Cannot list folder '{ref.path}': {exc.strerror or exc}.") from exc
+        names.sort(reverse=True)
+        roots = {str(r.resolved): r for r in catalog.folders()}
+        out: dict[str, Any] = {
+            "scope": f"subfolders of '{ref.path}'",
+            "folder": ref.path,
+            "kind": ref.kind,
+            "mapped_root": ref.mapped_root,
+        }
+        if ref.root_path is not None:
+            out["parent_folder"] = os.path.dirname(ref.path)
+        out["mapped_root_description"] = _clip(ref.primary.description, 400)
+        out.update(self._folder_metadata(ref))
+        budget = max(self.limits.max_output_bytes - ENVELOPE_RESERVE_BYTES - _size(out), 400)
+        folders: list[dict[str, Any]] = []
+        used = 0
+        start = max(offset, 0)
+        for name in names[start: start + self.limits.max_files_per_listing]:
+            mapped = roots.get(str(ref.resolved / name))
+            if mapped is not None:  # mapped in its own right: its own process-map entry applies
+                entry_out = {"folder": mapped.path, "kind": "mapped_root", "name": name, "mapped_root": mapped.path}
+            else:
+                entry_out = {"folder": os.path.join(ref.path, name), "kind": "subfolder", "name": name,
+                             "mapped_root": ref.mapped_root}
+            cost = _size(entry_out) + 2
+            if folders and used + cost > budget:
+                break
+            folders.append(entry_out)
+            used += cost
+        more = start + len(folders) < len(names)
+        out.update({
+            "total_folders": len(names),
+            "folders_returned": len(folders),
+            "folders": folders,
+            "truncated": more,
+            "sorted_by": "name, descending",
+            "note": "Only the immediate subfolders of this folder are listed; nothing is searched recursively. "
+                    "Pass a 'folder' value to list_csv_files, or to list_folders again to go one level deeper. "
+                    "Files in a subfolder are read using the mapped root's CSV format, filename convention and "
+                    "identifier columns.",
+        })
+        if more:
+            out["next_offset"] = start + len(folders)
+        if links:
+            out["symbolic_links_ignored"] = links
+        return out
+
+    def list_folders(self, process: str | None = None, offset: int = 0, folder: str | None = None) -> dict[str, Any]:
         catalog = self.catalog()
+        if folder is not None and folder != "":
+            if process:
+                raise ToolFailure("invalid_argument", "Give either process (mapped folders of a process) or folder "
+                                                      "(subfolders of one approved folder), not both.")
+            return self._list_subfolders(catalog, folder, offset)
         proc = self._process(catalog, process) if process else None
         refs = sorted(catalog.folders(proc), key=lambda r: r.path)
         budget = self.limits.max_output_bytes - ENVELOPE_RESERVE_BYTES
@@ -350,22 +458,12 @@ class Service:
                 if len(descriptions) > 1:
                     usage["description"] = folder.description  # each process describes it differently
                 usages.append(usage)
-            entry: dict[str, Any] = {"folder": ref.path}
+            entry: dict[str, Any] = {"folder": ref.path, "kind": "mapped_root"}
             if len(descriptions) == 1:
                 entry["description"] = descriptions[0]
             entry["exists_on_disk"] = ref.resolved.is_dir()
             entry["used_by"] = usages
-            convention = ref.filename_convention
-            if convention:
-                entry["filename_pattern"] = convention.pattern
-            identifiers: dict[str, str | None] = {}
-            for _, folder in ref.usages:
-                for column in folder.identifier_columns:
-                    identifiers.setdefault(column.column, column.identifier_type)
-            if identifiers:
-                entry["identifier_columns"] = [
-                    {"column": name, "identifier_type": kind} if kind else {"column": name}
-                    for name, kind in identifiers.items()]
+            entry.update(self._folder_metadata(ref))
             cost = _size(entry)
             if folders and used + cost > budget:
                 next_offset = index
@@ -379,7 +477,9 @@ class Service:
             "folders": folders,
             "truncated": next_offset is not None,
             "note": "Pass a folder's 'folder' value to list_csv_files. get_process_map has the rest: what each "
-                    "filename token means, record keys, field mappings and filter rules.",
+                    "filename token means, record keys, field mappings and filter rules. These are the mapped "
+                    "(approved) folders; call list_folders with folder=<one of them> to see its subfolders. "
+                    "record_key_columns are the columns normally used as filters to pin down one record.",
         }
         if next_offset is not None:
             out["next_offset"] = next_offset
@@ -389,18 +489,76 @@ class Service:
 
     # ------------------------------------------------------------------ files and headers
 
-    def _folder(self, folder: str) -> FolderRef:
-        catalog = self.catalog()
-        ref = catalog.find_folder(folder) if folder and folder.strip() else None
-        if ref is None:
-            known = [r.path for r in catalog.folders()]
-            raise ToolFailure(
-                "folder_not_found",
-                f"'{_clip(folder or '', 200)}' is not a folder described by any process map. Only mapped folders can be read.",
-                closest_known_folders=difflib.get_close_matches((folder or "")[:300], known, n=5, cutoff=0.4),
-                hint="Call list_folders for the full inventory.",
-            )
-        return ref
+    def _folder(self, folder: str, catalog: Catalog | None = None) -> FolderRef:
+        """Resolve a `folder` argument to a mapped folder or a genuine subfolder of one. Nothing else is reachable."""
+        catalog = catalog or self.catalog()
+        text = folder if isinstance(folder, str) else ""
+        ref = catalog.find_folder(text) if text.strip() else None
+        if ref is not None:
+            return ref
+        shown = _clip(text, 200)
+        if text.strip() and len(text) <= MAX_FOLDER_CHARS and "\x00" not in text:
+            if ".." in text.replace("\\", "/").split("/"):
+                raise ToolFailure(
+                    "folder_not_allowed",
+                    f"'{shown}' contains '..'. Parent-directory references are never followed; name a mapped folder "
+                    "or a subfolder of one exactly as list_folders returns it.")
+            found = catalog.find_root_of(text)
+            if found is not None:
+                return self._subfolder(catalog, found[0], found[1], shown)
+        known = [r.path for r in catalog.folders()]
+        raise ToolFailure(
+            "folder_not_found",
+            f"'{shown}' is not a folder described by any process map, nor a subfolder of one. Only mapped "
+            "folders and their subfolders can be read.",
+            closest_known_folders=difflib.get_close_matches(text[:300], known, n=5, cutoff=0.4),
+            hint="Call list_folders for the full inventory.",
+        )
+
+    def _subfolder(self, catalog: Catalog, root: FolderRef, parts: list[str], shown: str) -> FolderRef:
+        """Walk from a mapped folder down to a subfolder, one real directory at a time.
+
+        Every component must be an actual directory: a symbolic link is refused, never followed, so the
+        mapped folder stays the boundary of what can be reached.
+        """
+        if len(parts) > MAX_SUBFOLDER_DEPTH:
+            raise ToolFailure("invalid_argument", f"Subfolders deeper than {MAX_SUBFOLDER_DEPTH} levels are not supported.")
+        path = root.resolved
+        for depth, part in enumerate(parts):
+            parent = os.path.join(root.path, *parts[:depth])
+            if part in ("", ".", ".."):
+                raise ToolFailure("folder_not_allowed", f"'{shown}' is not a plain subfolder path.")
+            path = path / part
+            try:
+                st = os.lstat(path)  # lstat: a symbolic link is seen as a link, not as its target
+            except (FileNotFoundError, NotADirectoryError):
+                raise ToolFailure(
+                    "folder_not_found",
+                    f"'{shown}' does not exist: there is no subfolder '{_clip(part, 100)}' in '{_clip(parent, 200)}'.",
+                    mapped_root=root.path,
+                    hint=f"Call list_folders with folder='{_clip(parent, 200)}' to see its subfolders.",
+                ) from None
+            except (OSError, ValueError) as exc:
+                raise ToolFailure("folder_unreadable", f"Cannot access '{shown}': {getattr(exc, 'strerror', None) or exc}.") from exc
+            if stat_module.S_ISLNK(st.st_mode):
+                raise ToolFailure(
+                    "folder_not_allowed",
+                    f"'{_clip(part, 100)}' in '{_clip(parent, 200)}' is a symbolic link. Links are never followed, "
+                    "because they can lead outside the mapped folder.", mapped_root=root.path)
+            if not stat_module.S_ISDIR(st.st_mode):
+                raise ToolFailure("folder_not_found", f"'{shown}' is not a folder.", mapped_root=root.path)
+        # Second, independent check: with every link resolved the location must be unchanged.
+        if os.path.realpath(path) != str(path):
+            raise ToolFailure("folder_not_allowed", f"'{shown}' does not resolve to a location inside the mapped folder "
+                                                    f"'{root.path}'.", mapped_root=root.path)
+        # The nearest mapped folder above the location supplies the metadata (a subfolder may itself be mapped).
+        nearest = root
+        for ref in catalog.folders():
+            if ref.resolved == path:
+                return ref
+            if ref.resolved in path.parents and len(ref.resolved.parts) > len(nearest.resolved.parts):
+                nearest = ref
+        return nearest.child(os.path.relpath(path, nearest.resolved))
 
     def _open(self, folder: str, filename: str) -> OpenFile:
         ref = self._folder(folder)
@@ -440,10 +598,33 @@ class Service:
             raise ToolFailure("file_unreadable", f"'{filename}' is not a regular file (links and special files are not read).")
         return OpenFile(ref, path, filename, fmt, st.st_size, st.st_mtime_ns, (st.st_dev, st.st_ino))
 
+    @staticmethod
+    def _open_fd(of: OpenFile) -> int:
+        """Open the file read-only without following a link at any level below the mapped folder.
+
+        For a file in a subfolder the path is walked one directory at a time, each opened relative to
+        the one above it and refused if it is a link. A directory swapped for a link after the folder
+        was checked therefore cannot redirect the open to somewhere outside the mapped folder.
+        """
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        parts = of.ref.relative_parts
+        if not parts or os.open not in os.supports_dir_fd or not hasattr(os, "O_DIRECTORY"):
+            return os.open(of.path, flags)
+        step = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        dir_fd = os.open(of.ref.resolved.parents[len(parts) - 1], os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for part in parts:
+                below = os.open(part, step, dir_fd=dir_fd)
+                os.close(dir_fd)
+                dir_fd = below
+            return os.open(of.name, flags, dir_fd=dir_fd)
+        finally:
+            os.close(dir_fd)
+
     def _fh(self, of: OpenFile) -> BinaryIO:
         """Open read-only - the only way files are ever opened - and confirm it is the file that was checked."""
         try:
-            fd = os.open(of.path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+            fd = self._open_fd(of)
         except OSError as exc:
             raise ToolFailure("file_unreadable", f"Cannot open '{of.name}' for reading: {exc.strerror or exc}.") from exc
         try:
@@ -527,6 +708,47 @@ class Service:
             hint="Use search_column_names or inspect_csv_headers to find the right column.",
         )
 
+    def _filters(self, header: Header, of: OpenFile, filters: dict[str, str] | None, identifier_column: int | None,
+                 name: str = "filters") -> list[tuple[int, str]]:
+        """Resolve record-key filters to (column index, exact value) pairs, all of which one row must satisfy."""
+        if not filters:
+            return []
+        if not isinstance(filters, dict):
+            raise ToolFailure("invalid_argument", f"{name} must be an object of column name -> exact value.")
+        if len(filters) > MAX_FILTERS:
+            raise ToolFailure("invalid_argument", f"At most {MAX_FILTERS} {name} are supported.")
+        resolved: dict[int, str] = {}
+        for spec, value in filters.items():
+            if not isinstance(spec, str) or not isinstance(value, str):
+                raise ToolFailure("invalid_argument", f"{name}: column names and values must be text. Values are "
+                                                      "compared as exact text, so pass '00123', not 123.")
+            if len(value) > MAX_IDENTIFIER_CHARS:
+                raise ToolFailure("invalid_argument", f"{name}: a value is longer than {MAX_IDENTIFIER_CHARS} characters.")
+            index = self._column(header, spec, of)
+            if index == identifier_column:
+                raise ToolFailure(
+                    "invalid_argument",
+                    f"{name}: '{_clip(spec, 80)}' is the identifier column, which is already matched against the "
+                    "identifier. Filter on other columns.")
+            if index in resolved:
+                raise ToolFailure(
+                    "duplicate_filter_column",
+                    f"{name}: more than one entry refers to column '{_clip(header.label(index), 80)}' "
+                    f"(position {index + 1}). Give each column once.")
+            resolved[index] = value
+        return sorted(resolved.items())
+
+    @staticmethod
+    def _filters_shown(header: Header, filters: list[tuple[int, str]]) -> list[dict[str, str]]:
+        return [{"column": _clip(header.label(i), 80), "value": value} for i, value in filters]
+
+    @staticmethod
+    def _filters_text(header: Header, filters: list[tuple[int, str]]) -> str:
+        if not filters:
+            return ""
+        return " and, in the same row, " + " and ".join(
+            f"'{_clip(value, 60)}' in column '{_clip(header.label(i), 60)}'" for i, value in filters)
+
     def list_csv_files(self, folder: str, filename_contains: str | None = None, date_from: str | None = None,
                        date_to: str | None = None, date_field: str | None = None, offset: int = 0,
                        newest_first: bool = True) -> dict[str, Any]:
@@ -551,10 +773,14 @@ class Service:
             raise ToolFailure("folder_unreadable", f"Cannot list folder '{ref.path}': {exc.strerror or exc}.") from exc
 
         files: list[dict[str, Any]] = []
+        subfolders: list[str] = []
         ignored = unparseable = 0
         needle = filename_contains.casefold() if filename_contains else None
         for entry in entries:
             try:
+                if entry.is_dir(follow_symlinks=False):
+                    subfolders.append(entry.name)
+                    continue
                 if not entry.name.lower().endswith(".csv") or not entry.is_file(follow_symlinks=False):
                     ignored += 1
                     continue
@@ -583,7 +809,18 @@ class Service:
             files.append(item)
         files.sort(key=lambda f: f["filename"], reverse=newest_first)
 
-        budget = self.limits.max_output_bytes - ENVELOPE_RESERVE_BYTES
+        subfolders.sort(reverse=True)
+        shown = _some([os.path.join(ref.path, name) for name in subfolders[:SUBFOLDERS_IN_FILE_LISTING]], 1000)
+        nested: dict[str, Any] = {"subfolder_count": len(subfolders), "subfolders": shown}
+        if subfolders:
+            nested["subfolders_note"] = (
+                "Files inside subfolders are NOT included in this listing. Pass a subfolder path as 'folder' to list "
+                "its files"
+                + (f"; list_folders with folder='{_clip(ref.path, 200)}' pages through all {len(subfolders)} subfolders."
+                   if len(shown) < len(subfolders) else "."))
+        if ref.record_key_columns:
+            nested["record_key_columns"] = ref.record_key_columns
+        budget = max(self.limits.max_output_bytes - ENVELOPE_RESERVE_BYTES - _size(nested), 400)
         page: list[dict[str, Any]] = []
         used = 0
         start = max(offset, 0)
@@ -596,6 +833,8 @@ class Service:
         more = start + len(page) < len(files)
         out: dict[str, Any] = {
             "folder": ref.path,
+            "kind": ref.kind,
+            "mapped_root": ref.mapped_root,
             "filters": {"filename_contains": filename_contains, "date_from": lo, "date_to": hi, "date_field": field},
             "total_matching_files": len(files),
             "files_returned": len(page),
@@ -616,9 +855,10 @@ class Service:
             out["next_offset"] = start + len(page)
         if ignored:
             out["other_entries_ignored"] = ignored
-            out["other_entries_note"] = "Entries that are not regular .csv files (other types, links, folders) are not listed or read."
+            out["other_entries_note"] = "Entries that are not regular .csv files (other types, links) are not listed or read."
         if unparseable:
             out["files_excluded_because_filename_has_no_parseable_date"] = unparseable
+        out.update(nested)
         return out
 
     @staticmethod
@@ -784,8 +1024,10 @@ class Service:
 
     # ------------------------------------------------------------------ cursors
 
-    def _fingerprint(self, tool: str, of: OpenFile, identifier: str, column: int | None) -> str:
-        blob = json.dumps([tool, str(of.path), of.size, of.mtime_ns, of.fmt.delimiter, of.fmt.encoding, identifier, column])
+    def _fingerprint(self, tool: str, of: OpenFile, identifier: str, column: int | None,
+                     filters: list[tuple[int, str]]) -> str:
+        blob = json.dumps([tool, str(of.path), of.size, of.mtime_ns, of.fmt.delimiter, of.fmt.encoding, identifier,
+                           column, filters])
         return hashlib.sha256(blob.encode()).hexdigest()[:24]
 
     def _encode_cursor(self, state: dict[str, Any]) -> str:
@@ -881,8 +1123,18 @@ class Service:
 
     def _iter_matches(self, fh: BinaryIO, of: OpenFile, header: Header, identifier: str, column: int | None,
                       start_offset: int, start_record: int, control: ScanControl,
-                      hints: _Hints) -> Iterator[tuple[Record, list[int]]]:
-        """Yield (record, indices of matching fields) for exact matches, in file order."""
+                      hints: _Hints, filters: list[tuple[int, str]] = ()) -> Iterator[tuple[Record, list[int]]]:
+        """Yield (record, indices of matching fields) for exact matches, in file order.
+
+        With `filters`, a record matches only if it also holds each filter's exact value in that column.
+        """
+        def passes(record: Record) -> bool:
+            fields = record.fields
+            if all(i < len(fields) and fields[i] == value for i, value in filters):
+                return True
+            hints.filtered_out(record, header, filters)
+            return False
+
         control.alt_needles = self._alt_needles(identifier, of.fmt.encoding)
         control.alt_hits = set()
         control.undecodable_lines = 0
@@ -897,8 +1149,9 @@ class Service:
             if column is not None:
                 value = fields[column] if column < len(fields) else None
                 if value == identifier:
-                    control.matches += 1
-                    yield record, [column]
+                    if passes(record):
+                        control.matches += 1
+                        yield record, [column]
                     continue
                 if value is not None:
                     hints.value(record, header.label(column), value)
@@ -912,8 +1165,9 @@ class Service:
                 continue
             found = [i for i, value in enumerate(fields) if value == identifier]
             if found:
-                control.matches += 1
-                yield record, found
+                if passes(record):
+                    control.matches += 1
+                    yield record, found
             else:
                 for i, value in enumerate(fields):
                     if identifier in value:
@@ -921,7 +1175,8 @@ class Service:
 
     def _search(self, tool: str, control: ScanControl, folder: str, filename: str, identifier: str,
                 column: str | None, columns: list[str] | None, max_rows: int | None,
-                cursor: str | None, *, count_only: bool = False) -> dict[str, Any]:
+                cursor: str | None, *, count_only: bool = False,
+                filters: dict[str, str] | None = None) -> dict[str, Any]:
         """Shared implementation of find_security_in_file, search_across_columns and count_matching_rows."""
         control.begin()
         control.phase = "opening"
@@ -943,6 +1198,9 @@ class Service:
                 search["column"] = header.label(column_index)
             else:
                 search["columns_searched"] = f"all {len(header.columns)} columns"
+            row_filters = self._filters(header, of, filters, column_index)
+            search["filters"] = self._filters_shown(header, row_filters)
+            also = self._filters_text(header, row_filters)
             wanted = None
             if columns and not count_only:
                 wanted = [self._column(header, c, of) for c in columns]
@@ -952,7 +1210,7 @@ class Service:
             elif not count_only:
                 search["columns_returned"] = "all"
 
-            fingerprint = self._fingerprint(tool, of, identifier, column_index)
+            fingerprint = self._fingerprint(tool, of, identifier, column_index, row_filters)
             start_offset, start_record, before = header.data_offset, 1, 0
             if cursor:
                 state = self._decode_cursor(cursor, fingerprint)
@@ -975,7 +1233,7 @@ class Service:
             error: ToolFailure | None = None
             try:
                 for record, hits in self._iter_matches(fh, of, header, identifier, column_index,
-                                                       start_offset, start_record, control, hints):
+                                                       start_offset, start_record, control, hints, row_filters):
                     if count_only:
                         found += 1
                         continue
@@ -1050,7 +1308,7 @@ class Service:
             result["count"] = total if exact else None
             result["count_is_exact"] = exact
             if exact:
-                result["explanation"] = f"Complete scan: exactly {total} record(s) have '{shown_id}' in {where}." + aside
+                result["explanation"] = f"Complete scan: exactly {total} record(s) have '{shown_id}' in {where}{also}." + aside
             else:
                 result["matches_seen_before_interruption"] = total
                 result["explanation"] = (
@@ -1079,7 +1337,7 @@ class Service:
                             "record(s) returned are only the matches that could be read; there may be more."
                             + (" Pass next_cursor to continue." if next_cursor else ""))
             elif outcome == "confirmed_absent":
-                text = f"Complete scan: no record has '{shown_id}' as the exact value of {where}." + aside
+                text = f"Complete scan: no record has '{shown_id}' as the exact value of {where}{also}." + aside
             else:
                 text = (f"INCONCLUSIVE: no match was found, but absence is not confirmed because {why}."
                         + (" Pass next_cursor to continue the scan." if next_cursor else "") + aside)
@@ -1104,20 +1362,22 @@ class Service:
 
     def find_security_in_file(self, control: ScanControl, folder: str, filename: str, identifier: str,
                               identifier_column: str, columns: list[str] | None = None,
-                              max_rows: int | None = None, cursor: str | None = None) -> dict[str, Any]:
+                              max_rows: int | None = None, cursor: str | None = None,
+                              filters: dict[str, str] | None = None) -> dict[str, Any]:
         return self._search("find_security_in_file", control, folder, filename, identifier,
-                            identifier_column, columns, max_rows, cursor)
+                            identifier_column, columns, max_rows, cursor, filters=filters)
 
     def search_across_columns(self, control: ScanControl, folder: str, filename: str, identifier: str,
                               columns: list[str] | None = None, max_rows: int | None = None,
-                              cursor: str | None = None) -> dict[str, Any]:
+                              cursor: str | None = None, filters: dict[str, str] | None = None) -> dict[str, Any]:
         return self._search("search_across_columns", control, folder, filename, identifier,
-                            None, columns, max_rows, cursor)
+                            None, columns, max_rows, cursor, filters=filters)
 
     def count_matching_rows(self, control: ScanControl, folder: str, filename: str, identifier: str,
-                            identifier_column: str, cursor: str | None = None) -> dict[str, Any]:
+                            identifier_column: str, cursor: str | None = None,
+                            filters: dict[str, str] | None = None) -> dict[str, Any]:
         return self._search("count_matching_rows", control, folder, filename, identifier,
-                            identifier_column, None, None, cursor, count_only=True)
+                            identifier_column, None, None, cursor, count_only=True, filters=filters)
 
     # ------------------------------------------------------------------ comparison
 
@@ -1126,7 +1386,9 @@ class Service:
                                  identifier_column_b: str | None = None, identifier_b: str | None = None,
                                  compare_columns: list[str] | None = None,
                                  column_mapping: dict[str, str] | None = None,
-                                 match_keys: list[str] | None = None) -> dict[str, Any]:
+                                 match_keys: list[str] | None = None,
+                                 filters: dict[str, str] | None = None,
+                                 filters_b: dict[str, str] | None = None) -> dict[str, Any]:
         control.begin()
         control.phase = "opening"
         mapping = column_mapping or {}
@@ -1146,6 +1408,24 @@ class Service:
                 "a": self._column(head_a, identifier_column_a, sides["a"]),
                 "b": self._column(head_b, identifier_column_b or mapping.get(identifier_column_a, identifier_column_a), sides["b"]),
             }
+
+            # Record-key filters: `filters` names file A's columns and applies to both files (through
+            # column_mapping); `filters_b`, when given, replaces it for file B with B's own columns and values.
+            side_filters = {"a": self._filters(head_a, sides["a"], filters, id_cols["a"])}
+            if filters_b is not None:
+                side_filters["b"] = self._filters(head_b, sides["b"], filters_b, id_cols["b"], "filters_b")
+            else:
+                # Carried over by column, not by position: '#2' in file A means A's second column, by name, in B.
+                carried: dict[str, str] = {}
+                for index, value in side_filters["a"]:
+                    name = head_a.columns[index]
+                    target = next((mapping[k] for k in (name, head_a.labels[index], f"#{index + 1}") if k in mapping), name)
+                    if target in carried:
+                        raise ToolFailure("duplicate_filter_column", f"filters: more than one entry maps to column "
+                                                                     f"'{_clip(target, 80)}' of file B.")
+                    carried[target] = value
+                side_filters["b"] = self._filters(head_b, sides["b"], carried, id_cols["b"], "filters (applied to file B)")
+            filtered = bool(side_filters["a"] or side_filters["b"])
 
             def pair(name_a: str) -> tuple[int, int]:
                 return (self._column(head_a, name_a, sides["a"]),
@@ -1183,6 +1463,8 @@ class Service:
                 "identifier_b": identifier_b, "identifier_column_b": label_b[id_cols["b"]],
                 "match_type": MATCH_TYPE,
                 "match_keys": [{"a": label_a[a], "b": label_b[b]} for a, b in keys],
+                "filters_a": self._filters_shown(head_a, side_filters["a"]),
+                "filters_b": self._filters_shown(head_b, side_filters["b"]),
             }
             if compare_columns:
                 listed: list[dict[str, str]] = []
@@ -1223,7 +1505,7 @@ class Service:
                 problem: str | None = None
                 try:
                     for record, _ in self._iter_matches(handles[key], of, header, ident, id_cols[key],
-                                                        header.data_offset, 1, control, hints):
+                                                        header.data_offset, 1, control, hints, side_filters[key]):
                         if len(records[key]) >= cap:
                             reason = "too_many_matches"
                             break
@@ -1350,6 +1632,7 @@ class Service:
             result.setdefault("comparisons", []).append(out)
 
         incomplete = not (presence["a"]["scan_complete"] and presence["b"]["scan_complete"])
+        subject = "a record matching the identifier and all filters" if filtered else "the security"
         shown_a = [a for a, _ in pairs][:50]
         shown_b = [b for _, b in pairs][:50]
         if incomplete:
@@ -1357,12 +1640,15 @@ class Service:
             text = ("INCONCLUSIVE: at least one file was not scanned completely or could not be read reliably, so "
                     "presence and record alignment cannot be established. Any record counts above are partial. "
                     "No comparison was made.")
+            if "too_many_matches" in (presence["a"]["stop_reason"], presence["b"]["stop_reason"]):
+                text += (" A file holds more matching records than one comparison can line up: narrow it to one "
+                         "record with filters (for example a portfolio code).")
         elif not recs_a and not recs_b:
-            status, text = "absent_from_both", "Complete scans: the security is in neither file."
+            status, text = "absent_from_both", f"Complete scans: {subject} is in neither file."
         elif not recs_a or not recs_b:
             status = "present_in_one_file_only"
             there, missing = ("A", "B") if recs_a else ("B", "A")
-            text = f"Complete scans: the security is in file {there} ({len(recs_a or recs_b)} record(s)) and absent from file {missing}."
+            text = f"Complete scans: {subject} is in file {there} ({len(recs_a or recs_b)} record(s)) and absent from file {missing}."
             if recs_a:
                 list_records("records_in_file_a", recs_a, head_a, shown_a)
             else:

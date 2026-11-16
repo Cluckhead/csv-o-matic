@@ -16,6 +16,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from pydantic import Field
 
 from .config import Config, ConfigError, load_config
+from . import schemas
 from .csvscan import ScanControl
 from .service import Service, ToolFailure
 
@@ -32,9 +33,20 @@ Typical investigation:
    upstream/downstream links, filename conventions, identifier columns, field mappings and filter rules.
 2. list_folders, then list_csv_files on the folders that matter. Read the filename tokens carefully: several
    files for one business date usually mean retries, reruns or backfills (the process map says how to tell).
+   Folders may be nested (by date, run, portfolio...). list_csv_files names a folder's subfolders, and
+   list_folders with folder=<path> lists them one level at a time. A subfolder path is used as `folder`
+   exactly like a mapped folder, and its files follow the mapped folder's format and naming convention.
+   Only mapped folders and real subfolders of them can be reached; nothing is ever searched recursively.
 3. inspect_csv_headers / search_column_names to learn a file's layout.
 4. find_security_in_file (known column), search_across_columns (unknown column), count_matching_rows,
    compare_security_records.
+
+Pinning down one record: an identifier alone often matches many rows (one ISIN in a hundred portfolios).
+Pass `filters` - column -> exact value, all of which must hold in the SAME row as the identifier - to ask
+about one record, e.g. identifier GB1234567890 in column isin with filters {"portfolio_code": "ABC"}.
+The folder's record_key_columns (list_folders / get_process_map) say which columns normally identify one
+record, but any column can be a filter. With filters, match_found / confirmed_absent / counts all refer to
+the identifier AND every filter together; near_misses reports rows that had the identifier but failed a filter.
 
 Reading results:
 - outcome is one of match_found, confirmed_absent (only after a complete scan) or inconclusive.
@@ -48,10 +60,20 @@ Reading results:
 - record_number is 1-based and counts the header as record 1.
 - filesystem_modified_time is when a file was written to disk; business dates and run timestamps come from
   the filename tokens.
+- Every response is returned twice with identical content: as structured content matching the tool's
+  output schema, and as JSON text. A field that does not apply is absent; a value that is unavailable is null.
 You choose the files and interpret the evidence; the server only reports what is in the files you select.
 """
 
-Folder = Annotated[str, Field(description="Folder path exactly as returned by list_folders")]
+Folder = Annotated[str, Field(description="Folder path exactly as returned by list_folders or list_csv_files: "
+                                           "a mapped folder, or a subfolder of one")]
+Filters = Annotated[
+    dict[str, str] | None,
+    Field(description="Optional record-key filters: column name (or '#<position>') -> exact value. A row matches "
+                      "only if it holds the identifier AND every one of these values, each as the whole, "
+                      "case-sensitive text of that column. Values are text: '00123' is not '123'. Typically the "
+                      "folder's record_key_columns, e.g. {\"portfolio_code\": \"ABC\"}."),
+]
 Filename = Annotated[str, Field(description="File name exactly as returned by list_csv_files (no path)")]
 Identifier = Annotated[str, Field(description="Value to match exactly against whole field values, as text. Leading zeroes are significant; partial values do not match.")]
 Columns = Annotated[
@@ -85,13 +107,18 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         if size > limits.max_output_bytes:
             # Responses are built to fit; this is the backstop that guarantees the bound.
             is_error = True
-            text = json.dumps({
-                "tool": tool,
-                "error": {"type": "response_too_large",
-                          "message": f"The response exceeded the output-size limit of {limits.max_output_bytes} bytes. "
-                                     "Request fewer columns or rows."},
-            })
-        return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=is_error)
+            message = (f"The response exceeded the output-size limit of {limits.max_output_bytes} bytes. "
+                       "Request fewer columns or rows.")
+            payload = {"tool": tool}
+            if tool in SEARCH_TOOLS:
+                payload["outcome"] = "inconclusive"
+                payload["explanation"] = f"INCONCLUSIVE: no result could be returned. {message}"
+            payload["error"] = {"type": "response_too_large", "message": message}
+            text = json.dumps(payload)
+        # The same object twice: as structured content (described by the tool's output schema) and as
+        # JSON text for clients that only read text. The size limit applies to each representation.
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)],
+                                    structured_content=json.loads(text), is_error=is_error)
 
     def guarded(tool: str, request: dict[str, Any], fn: Callable[[], dict[str, Any]]) -> tuple[dict[str, Any], bool]:
         """Run a tool body, turning failures into explicit, structured explanations."""
@@ -172,7 +199,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
     async def get_process_map(
         process: Annotated[str | None, Field(description="Process id or name. Omit to list the available processes.")] = None,
         step_id: Annotated[str | None, Field(description="Optional: return only this step, in full, with the folders it touches")] = None,
-    ) -> types.CallToolResult:
+    ) -> Annotated[types.CallToolResult, schemas.GetProcessMapResult]:
         """Describe an ETL process: purpose, steps, folders, upstream/downstream links (including branches),
         filename conventions and timestamp meanings, identifier columns, field mappings, and known
         transformation and filter rules. Called without arguments it lists the available processes
@@ -184,12 +211,18 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
     async def list_folders(
         process: Annotated[str | None, Field(description="Process id or name. Omit for the folders of all processes.")] = None,
         offset: Annotated[int, Field(description="Continue a truncated listing from this next_offset")] = 0,
-    ) -> types.CallToolResult:
+        folder: Annotated[str | None, Field(description="A mapped folder or subfolder, as returned by this tool. When "
+                                                        "given, its immediate subfolders are listed instead (one "
+                                                        "level; not recursive). Do not combine with process.")] = None,
+    ) -> Annotated[types.CallToolResult, schemas.ListFoldersResult]:
         """List the folders described by the process maps - all of them, or those of one process. Each entry
-        has the folder path, its description, and the process steps that read or write it. Use this to decide
-        which folders may hold relevant data, then call list_csv_files on them."""
-        return await quick("list_folders", {"process": process, "offset": offset},
-                           lambda: service.list_folders(process, offset))
+        has the folder path, its description, the process steps that read or write it, and its identifier and
+        record-key columns. Use this to decide which folders may hold relevant data, then call list_csv_files
+        on them. With `folder`, lists the immediate subfolders of that folder instead (kind 'subfolder', each
+        tied to its mapped_root), so nested layouts such as year/month/day can be walked one level at a time.
+        Only mapped folders and their real subfolders exist for this server; links are never followed."""
+        return await quick("list_folders", {"process": process, "offset": offset, "folder": folder},
+                           lambda: service.list_folders(process, offset, folder))
 
     @server.tool(annotations=read_only)
     async def list_csv_files(
@@ -204,11 +237,12 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         ] = None,
         offset: Annotated[int, Field(description="Continue a truncated listing from this next_offset")] = 0,
         newest_first: Annotated[bool, Field(description="Sort filenames descending (default) or ascending")] = True,
-    ) -> types.CallToolResult:
+    ) -> Annotated[types.CallToolResult, schemas.ListCsvFilesResult]:
         """List the CSV files that actually exist in one folder right now, with size and filesystem modification
         time, plus the dates/timestamps parsed from each filename according to the folder's naming convention.
         Filesystem modification time and filename dates are reported separately and mean different things.
-        Optional filename and date filters narrow the listing."""
+        Optional filename and date filters narrow the listing. Only files directly in the folder are listed;
+        its subfolders are named in `subfolders` and must be listed separately."""
         request = {"folder": folder, "filename_contains": filename_contains, "date_from": date_from,
                    "date_to": date_to, "date_field": date_field, "offset": offset}
         return await quick("list_csv_files", request, lambda: service.list_csv_files(
@@ -221,7 +255,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         sample_rows: Annotated[int, Field(description="Number of leading data rows to include, up to the server's sample limit. Default 0: headers only.")] = 0,
         sample_columns: Annotated[list[str] | None, Field(description="Limit sample rows to these columns")] = None,
         column_offset: Annotated[int, Field(description="Continue a truncated column list from this next_column_offset")] = 0,
-    ) -> types.CallToolResult:
+    ) -> Annotated[types.CallToolResult, schemas.InspectCsvHeadersResult]:
         """Return a CSV file's column names in their original order. Optionally include a few leading data rows
         to understand the layout. The sample is only the start of the file - never use it to judge whether a
         security is present."""
@@ -235,7 +269,7 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         folder: Folder,
         filename: Filename,
         term: Annotated[str, Field(description="Text to look for in column names (case-insensitive substring)")],
-    ) -> types.CallToolResult:
+    ) -> Annotated[types.CallToolResult, schemas.SearchColumnNamesResult]:
         """Find columns whose names contain a term, without retrieving the whole header. Useful for files with
         hundreds of columns. Returns matching column names and their positions."""
         return await quick("search_column_names", {"folder": folder, "filename": filename, "term": term},
@@ -254,16 +288,19 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         max_rows: MaxRows = None,
         cursor: Cursor = None,
         max_scan_seconds: ScanSeconds = None,
-    ) -> types.CallToolResult:
+        filters: Filters = None,
+    ) -> Annotated[types.CallToolResult, schemas.SearchResult]:
         """Find the rows of one file whose identifier_column equals the identifier exactly. Returns each matching
         row with its original column labels (the whole row, or just `columns`). Values are text exactly as in
         the file. The response states whether the scan completed and whether all matches were returned; when
-        results are partial, pass next_cursor to continue."""
+        results are partial, pass next_cursor to continue. Add `filters` to ask about one specific record
+        (e.g. this ISIN in this portfolio): confirmed_absent then means no row has the identifier together
+        with every filter value."""
         request = {"folder": folder, "filename": filename, "identifier": identifier,
-                   "identifier_column": identifier_column, "columns": columns, "max_rows": max_rows}
+                   "identifier_column": identifier_column, "filters": filters, "columns": columns, "max_rows": max_rows}
         return await scan(ctx, "find_security_in_file", request, max_scan_seconds, lambda control:
                           service.find_security_in_file(control, folder, filename, identifier, identifier_column,
-                                                        columns, max_rows, cursor))
+                                                        columns, max_rows, cursor, filters))
 
     @server.tool(annotations=read_only)
     async def search_across_columns(
@@ -275,13 +312,17 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         max_rows: MaxRows = None,
         cursor: Cursor = None,
         max_scan_seconds: ScanSeconds = None,
-    ) -> types.CallToolResult:
+        filters: Filters = None,
+    ) -> Annotated[types.CallToolResult, schemas.SearchResult]:
         """Find rows where ANY column equals the identifier exactly - for when you do not know which column
         holds it. Each matching row is returned once, with matched_columns naming every column that matched
-        (matched columns are always included in the returned values)."""
-        request = {"folder": folder, "filename": filename, "identifier": identifier, "columns": columns, "max_rows": max_rows}
+        (matched columns are always included in the returned values). With `filters`, the identifier must
+        match at least one column of a row that also satisfies every filter."""
+        request = {"folder": folder, "filename": filename, "identifier": identifier, "filters": filters,
+                   "columns": columns, "max_rows": max_rows}
         return await scan(ctx, "search_across_columns", request, max_scan_seconds, lambda control:
-                          service.search_across_columns(control, folder, filename, identifier, columns, max_rows, cursor))
+                          service.search_across_columns(control, folder, filename, identifier, columns, max_rows,
+                                                        cursor, filters))
 
     @server.tool(annotations=read_only)
     async def count_matching_rows(
@@ -292,13 +333,17 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         ctx: Context,
         cursor: Cursor = None,
         max_scan_seconds: ScanSeconds = None,
-    ) -> types.CallToolResult:
+        filters: Filters = None,
+    ) -> Annotated[types.CallToolResult, schemas.CountResult]:
         """Count the rows whose identifier_column equals the identifier exactly, without returning row contents.
         `count` is only given after a complete scan of the file. If the scan is interrupted, count is null,
-        count_is_exact is false, and next_cursor (when present) continues the count."""
-        request = {"folder": folder, "filename": filename, "identifier": identifier, "identifier_column": identifier_column}
+        count_is_exact is false, and next_cursor (when present) continues the count. With `filters`, only
+        rows that also satisfy every filter are counted."""
+        request = {"folder": folder, "filename": filename, "identifier": identifier,
+                   "identifier_column": identifier_column, "filters": filters}
         return await scan(ctx, "count_matching_rows", request, max_scan_seconds, lambda control:
-                          service.count_matching_rows(control, folder, filename, identifier, identifier_column, cursor))
+                          service.count_matching_rows(control, folder, filename, identifier, identifier_column,
+                                                      cursor, filters))
 
     @server.tool(annotations=read_only)
     async def compare_security_records(
@@ -315,20 +360,34 @@ def build_server(config: Config, service: Service | None = None) -> MCPServer:
         column_mapping: Annotated[dict[str, str] | None, Field(description="File A column name -> file B column name, for columns named differently")] = None,
         match_keys: Annotated[list[str] | None, Field(description="File A column names that pair up records when a file holds several for the security (e.g. portfolio, trade date)")] = None,
         max_scan_seconds: ScanSeconds = None,
-    ) -> types.CallToolResult:
+        filters: Annotated[
+            dict[str, str] | None,
+            Field(description="Optional record-key filters, by file A column name -> exact value, e.g. "
+                              "{\"portfolio_code\": \"ABC\"}. Applied to both files (file B's column names come "
+                              "from column_mapping), so only the record matching the identifier and every filter "
+                              "is compared."),
+        ] = None,
+        filters_b: Annotated[
+            dict[str, str] | None,
+            Field(description="Filters for file B, by file B column name -> exact value, when its columns or values "
+                              "differ from file A's. Replaces `filters` for file B; pass {} for no filter on file B."),
+        ] = None,
+    ) -> Annotated[types.CallToolResult, schemas.CompareResult]:
         """Find one security in two files and compare field values. Reports whether it is present in each file
         and lists changed and unchanged values. Values are compared as exact text; differences that are only
         formatting (whitespace, case, numeric format) are still listed as changed, with a note. If either file
-        has several matching records, supply match_keys; otherwise the alignment is reported as ambiguous
-        rather than guessed."""
+        has several matching records, either narrow to one record with `filters` (e.g. one portfolio) or
+        supply match_keys to pair them up; otherwise the alignment is reported as ambiguous rather than guessed."""
         request = {"folder_a": folder_a, "filename_a": filename_a, "folder_b": folder_b, "filename_b": filename_b,
                    "identifier": identifier, "identifier_column_a": identifier_column_a,
                    "identifier_column_b": identifier_column_b, "identifier_b": identifier_b,
-                   "compare_columns": compare_columns, "column_mapping": column_mapping, "match_keys": match_keys}
+                   "compare_columns": compare_columns, "column_mapping": column_mapping, "match_keys": match_keys,
+                   "filters": filters, "filters_b": filters_b}
         return await scan(ctx, "compare_security_records", request, max_scan_seconds, lambda control:
                           service.compare_security_records(control, folder_a, filename_a, folder_b, filename_b,
                                                            identifier, identifier_column_a, identifier_column_b,
-                                                           identifier_b, compare_columns, column_mapping, match_keys))
+                                                           identifier_b, compare_columns, column_mapping, match_keys,
+                                                           filters, filters_b))
 
     return server
 

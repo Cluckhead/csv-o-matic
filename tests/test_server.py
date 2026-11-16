@@ -14,7 +14,7 @@ from csv_o_matic.config import Config, Limits
 from csv_o_matic.server import build_server
 from csv_o_matic.service import Service
 
-from conftest import digest
+from conftest import check_schema, digest
 
 A = "stage/a"
 TRICKY = "a_20261112_20261112T180000.csv"
@@ -33,7 +33,11 @@ def config(env, **limits) -> Config:
 async def call(client, tool, **args):
     result = await client.call_tool(tool, args)
     assert len(result.content) == 1
-    return json.loads(result.content[0].text), result
+    out = json.loads(result.content[0].text)
+    # Every response, failures included, is also structured content: the same object, fitting the schema.
+    assert result.structured_content == out
+    check_schema(tool, out)
+    return out, result
 
 
 @pytest.fixture

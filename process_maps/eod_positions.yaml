@@ -47,7 +47,13 @@ folders:
     identifier_columns:
       - {column: isin, identifier_type: ISIN}
       - {column: sedol, identifier_type: SEDOL}
+    # One security is held by many portfolios, so an ISIN alone matches many rows. These columns
+    # identify one record; the tools accept them as `filters`, e.g. {portfolio_code: PF001}.
     record_key_columns: [portfolio_code, isin]
+    notes: >
+      Files for earlier position dates are moved to subfolders archive/YYYY/MM. Subfolders of a mapped
+      folder need no entry of their own: they are discovered with list_folders and their files use this
+      folder's filename convention, identifier columns and CSV format.
 
   - id: client_report
     path: positions/03a_client_report
