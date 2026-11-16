@@ -1,0 +1,1218 @@
+<!doctype html>
+<html lang="en-GB" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--PAGE:HEAD-->
+<!-- Keep <title> first: some hosts only scan the first 8 KB for it, and the fonts below are large. -->
+<title>Why Launch Did Not Move</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/*FONTS:START*/
+/* Run scripts/embed_fonts.py to replace this block with the embedded IBM Plex faces and their licence notice. */
+/*FONTS:END*/
+
+/* ======================================================================
+   Layout: 48 px navy application bar; unboxed two-column hero; editorial
+   bands (prose 65-72ch + analytical margin rail); 1:2 control-and-visual
+   workbenches; one Midnight focal stage. Light theme first, always.
+   ====================================================================== */
+:root {
+  color-scheme: light;
+  --canvas: #F3F7FB;
+  --panel: #FFFFFF;
+  --bar: #003168;
+  --bar-fg: #F3F7FB;
+  --bar-muted: #A9C1DA;
+  --bar-active-bg: #F3F7FB;
+  --bar-active-fg: #003168;
+  --focal: #071B2C;
+  --heading: #003168;
+  --text: #344F68;
+  --muted: #53677A;
+  --baseline: #0051A5;
+  --accent: #007F73;
+  --line: #D5E1EA;
+  --segment: #CADBEA;
+  --control: #EAF2F8;
+  --selected: #003168;
+  --selected-fg: #FFFFFF;
+  --warn: #9A5B00;
+  --warn-soft: #FBF0DD;
+  --risk: #B4232F;
+  --risk-soft: #FBE4E6;
+  --shadow: 0 2px 12px rgba(0, 49, 104, 0.09);
+
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --measure: 70ch;
+  --gutter: clamp(16px, 1.6vw, 32px);
+  --gap: clamp(16px, 1.25vw, 24px);
+  --pad: clamp(16px, 1.3vw, 24px);
+  --radius: 5px;
+  --bar-h: 48px;
+}
+/* Dark tokens: the reader's explicit choice, and the one Midnight focal stage in either theme. */
+:root[data-theme="dark"], .stage-dark {
+  color-scheme: dark;
+  --canvas: #071B2C;
+  --panel: #102A40;
+  --bar: #102A40;
+  --bar-fg: #F3F7FB;
+  --bar-muted: #A3B7C7;
+  --heading: #F3F7FB;
+  --text: #D5E1ED;
+  --muted: #A3B7C7;
+  --baseline: #73B0E3;
+  --accent: #35E0C1;
+  --line: #365169;
+  --segment: #35546D;
+  --control: #18364E;
+  --selected: #73B0E3;
+  --selected-fg: #071B2C;
+  --warn: #F2B45A;
+  --warn-soft: #3A2A12;
+  --risk: #FF8A8F;
+  --risk-soft: #3D1A20;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.26);
+}
+:root[data-theme="dark"] { --focal: #002750; }
+.stage-dark { background: var(--focal); color: var(--text); }
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--bar-h) + 16px); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+body {
+  margin: 0; background: var(--canvas); color: var(--text);
+  font: 400 16px/1.55 var(--font-sans);
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); background: var(--bar); z-index: 30; }
+h1, h2, h3, h4 { color: var(--heading); font-weight: 600; line-height: 1.2; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 0.16em; }
+strong, b { font-weight: 600; color: var(--heading); }
+code, kbd, samp { font-family: var(--font-mono); font-size: 0.88em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.kicker {
+  font: 400 12px/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+}
+.shell {
+  width: 100%; max-width: 1720px; margin: 0 auto;
+  padding-left: max(var(--gutter), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--gutter), env(safe-area-inset-right, 0px));
+}
+
+/* ---------------- application bar ---------------- */
+.appbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--bar); color: var(--bar-fg); }
+.appbar .shell { height: var(--bar-h); display: flex; align-items: center; gap: 20px; }
+.appbar .ctx { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-shrink: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appbar .ctx .kicker { color: var(--bar-muted); }
+.appbar .ctx b { color: var(--bar-fg); font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.appbar nav { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.appbar nav::-webkit-scrollbar { display: none; }
+.appbar nav ol { list-style: none; margin: 0; padding: 0; display: flex; gap: 2px; }
+.appbar nav a {
+  display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px; border-radius: 4px;
+  color: var(--bar-muted); text-decoration: none; font-size: 13px; white-space: nowrap;
+}
+.appbar nav a .idx { font-family: var(--font-mono); font-size: 12px; }
+.appbar nav a:hover, .appbar nav a[aria-current="true"] { color: var(--bar-fg); background: rgba(255, 255, 255, 0.1); }
+.appbar nav a[aria-current="true"] .idx { color: #35E0C1; }
+.stepper { display: none; gap: 4px; }
+:root[data-guided] .stepper { display: flex; }
+.theme-switch { display: flex; padding: 2px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); flex-shrink: 0; }
+.theme-switch button, .stepper button {
+  font: 500 12px/1 var(--font-sans); color: var(--bar-muted); background: transparent; border: 0;
+  min-height: 32px; min-width: 52px; padding: 0 10px; border-radius: 4px; cursor: pointer;
+}
+.theme-switch button[aria-pressed="true"] { background: var(--bar-active-bg); color: var(--bar-active-fg); }
+@media (max-width: 760px) { .appbar .ctx .kicker { display: none; } .appbar nav a .lbl { display: none; } }
+.appbar nav.compact a .lbl { display: none; }   /* set by script when the labels would overflow */
+.appbar nav.compact a { padding: 0 8px; }
+
+/* ---------------- page rhythm ---------------- */
+main.shell { display: flex; flex-direction: column; gap: clamp(40px, 4vw, 72px); padding-block: clamp(24px, 3vw, 48px) 96px; }
+section { display: flex; flex-direction: column; gap: var(--gap); }
+.section-head { display: flex; flex-direction: column; gap: 8px; max-width: 110ch; }
+.section-head h2 {
+  display: flex; gap: 14px; align-items: baseline; font-size: clamp(22px, 1.6vw, 28px); letter-spacing: -0.015em;
+  padding-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.section-head h2 .idx { font: 400 0.7em/1 var(--font-mono); color: var(--accent); letter-spacing: 0; }
+.section-head .takeaway { font-size: clamp(17px, 1vw, 18px); max-width: var(--measure); }
+
+/* ---------------- hero ---------------- */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(20px, 3vw, 56px); padding-bottom: clamp(24px, 2.4vw, 40px); border-bottom: 1px solid var(--line); align-items: start; }
+@media (min-width: 760px) { .hero { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); } }
+.hero h1 { font-size: clamp(36px, 3.2vw, 56px); line-height: 1.08; letter-spacing: -0.038em; margin-top: 10px; }
+.hero .thesis { font-size: clamp(17px, 1.05vw, 19px); line-height: 1.6; max-width: var(--measure); }
+.hero .right { display: flex; flex-direction: column; gap: 20px; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.metric { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+.metric .value { font: 400 clamp(24px, 1.8vw, 34px)/1.1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--heading); }
+.metric .value small { font-size: 0.5em; color: var(--muted); margin-left: 4px; }
+.metric .note { font-size: 13px; color: var(--muted); }
+.metric .tag { align-self: flex-start; }
+
+/* ---------------- panels ---------------- */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--pad); min-width: 0; }
+.panel > h3, .rail-card > h3 { font-size: clamp(17px, 1.1vw, 20px); margin-bottom: 10px; }
+
+/* ---------------- editorial band: prose + margin rail ---------------- */
+.band { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); align-items: start; }
+@media (min-width: 1180px) { .band { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); } }
+.prose { display: flex; flex-direction: column; gap: 1em; font-size: clamp(17px, 0.95vw + 4px, 18px); line-height: 1.63; }
+.prose > * { max-width: var(--measure); }
+.prose h3 { font-size: 1.15em; margin-top: 0.6em; }
+.prose ul, .prose ol { margin: 0; padding-left: 1.25em; display: flex; flex-direction: column; gap: 0.35em; }
+.rail { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+.rail-card { font-size: 14px; }
+.rail-card dl { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.rail-card dt { font-weight: 600; color: var(--heading); }
+.rail-card dd { margin: 2px 0 0; }
+.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.timeline li { display: grid; grid-template-columns: 5.2em minmax(0, 1fr); gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.timeline li:first-child { border-top: 0; }
+.timeline time { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.scope ul { margin: 4px 0 0; padding-left: 1.1em; }
+
+/* ---------------- evidence tags, chips, triggers, callouts ---------------- */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px; font: 400 11px/1 var(--font-mono); letter-spacing: 0.04em;
+  text-transform: uppercase; padding: 4px 6px; border-radius: 3px; border: 1px solid currentColor; white-space: nowrap; vertical-align: 0.15em;
+}
+.tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.tag-measured { color: var(--baseline); }
+.tag-modelled { color: var(--accent); }
+.tag-assumed { color: var(--warn); }
+.tag-illustrative { color: var(--muted); }
+.tag-illustrative::before { background: transparent; border: 1px solid currentColor; }
+.chip { display: inline-block; font: 400 12px/1 var(--font-mono); padding: 5px 7px; border-radius: 3px; background: var(--control); color: var(--heading); white-space: nowrap; }
+@media (max-width: 520px) { .chip { white-space: normal; overflow-wrap: anywhere; } }
+.chip.ok { color: var(--accent); } .chip.warn { color: var(--warn); background: var(--warn-soft); } .chip.risk { color: var(--risk); background: var(--risk-soft); }
+button.trigger {
+  font: inherit; color: var(--accent); background: none; border: 0; padding: 0.15em 0.1em; margin: -0.15em 0; text-align: left;
+  text-decoration: underline dotted; text-underline-offset: 0.2em; cursor: pointer; border-radius: 2px;
+}
+button.trigger:hover { text-decoration-style: solid; }
+button.trigger[aria-pressed="true"] { background: var(--control); text-decoration-style: solid; }
+.callout { border: 1px solid var(--line); border-left: 4px solid var(--baseline); background: var(--panel); border-radius: var(--radius); padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; max-width: 110ch; }
+.callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+.callout.risk { border-left-color: var(--risk); background: var(--risk-soft); }
+
+/* ---------------- workbench: controls 1fr, visual 2fr ---------------- */
+.walkthrough { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); align-items: start; }
+@media (min-width: 1180px) {
+  .walkthrough { grid-template-columns: minmax(0, 0.9fr) minmax(0, 2fr); }
+  .walkthrough > .workbench { position: sticky; top: calc(var(--bar-h) + 16px + env(safe-area-inset-top, 0px));
+    max-height: calc(100vh - var(--bar-h) - 32px); overflow-y: auto; overscroll-behavior: contain; }
+}
+.steps { display: flex; flex-direction: column; gap: clamp(28px, 3vw, 64px); }
+.steps .prose { padding: var(--pad); border-left: 2px solid var(--line); }
+.steps .prose.is-active { border-left-color: var(--accent); }
+.workbench { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); align-items: start; }
+@media (min-width: 1600px) { .walkthrough .workbench { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); } }
+@media (min-width: 1180px) { .workbench.wide { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); } }
+.controls { display: flex; flex-direction: column; gap: 18px; }
+.control-group { background: var(--control); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+.ctl { display: flex; flex-direction: column; gap: 6px; }
+.ctl-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 14px; }
+.ctl-head label { color: var(--heading); font-weight: 600; }
+.ctl-head output { font: 400 14px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--heading); }
+.ctl-head output small { color: var(--muted); }
+input[type="range"] { width: 100%; min-height: 44px; margin: 0; accent-color: var(--accent); background: transparent; cursor: pointer; }
+.presets, .timebar, .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.timebar > .ctl { flex: 1 1 100%; }   /* the scrubber gets its own row; play and step buttons sit beneath */
+.ctl-label { color: var(--heading); font-weight: 600; }
+.ctl-help { font-size: 13px; color: var(--muted); }
+.switch {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0; background: none; border: 0;
+  font: 600 14px/1.3 var(--font-sans); color: var(--heading); cursor: pointer; text-align: left;
+}
+.switch-track { position: relative; flex: 0 0 auto; width: 40px; height: 22px; border-radius: 11px; background: var(--segment); }
+.switch-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--panel); }
+.switch[aria-checked="true"] .switch-track { background: var(--accent); }
+.switch[aria-checked="true"] .switch-track::after { left: 21px; }
+@media (prefers-reduced-motion: no-preference) { .switch-track, .switch-track::after { transition: all 200ms ease; } }
+.pill {
+  font: 500 13px/1.2 var(--font-sans); color: var(--heading); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 4px; min-height: 44px; padding: 0 12px; cursor: pointer;
+}
+.pill:hover { border-color: var(--accent); }
+.pill[aria-pressed="true"] { background: var(--selected); color: var(--selected-fg); border-color: var(--selected); }
+.readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.readout div { display: flex; flex-direction: column; gap: 2px; }
+.readout .v { font: 400 clamp(22px, 1.5vw, 28px)/1.1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--heading); }
+.readout .v small { font-size: 0.5em; color: var(--muted); margin-left: 3px; }
+.live { font-size: 14px; min-height: 3em; }
+.stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; border-radius: var(--radius); padding: var(--pad); box-shadow: var(--shadow); }
+.stage:not(.stage-dark) { background: var(--panel); border: 1px solid var(--line); }
+.stage figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: baseline; }
+.stage figcaption h3 { font-size: clamp(16px, 1vw, 19px); }
+.stage svg { display: block; width: 100%; height: auto; overflow: visible; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+.fig-summary { font-size: 14px; color: var(--muted); max-width: 90ch; }
+.fallback { font-size: 13px; }
+.js .fallback { display: none; }
+
+/* SVG roles */
+.ax line, .ax path { stroke: var(--line); }
+.ax text, .lbl { fill: var(--muted); font: 400 12px var(--font-mono); font-variant-numeric: tabular-nums; }
+.lbl-strong { fill: var(--heading); font: 600 13px var(--font-sans); }
+/* Plan figures (the template's example). Replace with your own roles; keep one meaning per encoding. */
+.grid { stroke: var(--line); stroke-width: 1; opacity: 0.6; }
+.row-lbl { fill: var(--text); font: 400 13px var(--font-sans); }
+.act { fill: var(--baseline); }
+.act.act-edit { fill: var(--accent); }
+.act.crit { stroke: var(--heading); stroke-width: 2.5; }
+.act.todo { opacity: 0.22; }
+.hatch-bg { fill: var(--panel); }
+.stage-dark .hatch-bg { fill: var(--focal); }
+.hatch-line { stroke: var(--muted); stroke-width: 2; }
+.spare { stroke: var(--muted); stroke-width: 1; }
+.spare-lbl { fill: var(--heading); font: 400 12px var(--font-mono); paint-order: stroke; stroke: var(--panel); stroke-width: 4px; }
+.stage-dark .spare-lbl { stroke: var(--focal); }
+.launch { fill: var(--heading); }
+.launch-line { stroke: var(--heading); stroke-width: 1.5; }
+.launch-lbl { font-size: 12px; }
+.ghost { fill: none; stroke: var(--baseline); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.ghost-launch { stroke: var(--baseline); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.drag-hit { fill: transparent; cursor: ew-resize; touch-action: none; }
+.drag-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 2; pointer-events: none; }
+.drag-hit:focus-visible + .drag-handle { stroke: var(--heading); stroke-width: 3; }
+.cursor { stroke: var(--heading); stroke-width: 1; opacity: 0.7; }
+.dim { opacity: 0.25; }
+
+/* ---------------- figures: one question, one action, placed in the reading flow ---------------- */
+.figure { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); align-items: start; }
+@media (min-width: 1180px) { .figure { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); } }
+.fig-controls, .fig-stage { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--pad); min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.fig-stage svg { display: block; width: 100%; height: auto; overflow: visible; }
+.fig-stage .live { font-size: 15px; color: var(--heading); min-height: 2.6em; }
+section > .prose { max-width: var(--measure); }
+.key { display: inline-block; padding: 0 0.3em; border-radius: 2px; }
+.key-spare { background: repeating-linear-gradient(45deg, var(--panel) 0 3px, var(--segment) 3px 5px); border: 1px solid var(--muted); }
+.key-critical { border: 2.5px solid var(--heading); }
+
+/* prediction prompt: the reader commits before the figure shows the answer */
+.predict { border: 1px solid var(--accent); border-radius: var(--radius); background: var(--panel); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; max-width: var(--measure); }
+.predict-q { color: var(--heading); font-size: 17px; display: flex; flex-direction: column; gap: 4px; }
+.predict .pill[aria-pressed="true"] { background: var(--selected); color: var(--selected-fg); }
+.predict .pill[disabled] { cursor: default; }
+.js .predict:not(.answered) [data-reveal] { display: none; }
+.predict-a { font-size: 15px; }
+.predict-verdict { font-weight: 600; color: var(--heading); }
+.v-text { font-family: var(--font-sans) !important; font-size: clamp(18px, 1.2vw, 22px) !important; }
+@media print { .predict [data-reveal] { display: block !important; } }
+
+/* ---------------- tables and disclosures ---------------- */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font: 400 11px/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: var(--control); white-space: nowrap; }
+td.n, th.n { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+details.audit { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+details.audit > summary {
+  list-style: none; cursor: pointer; padding: 14px var(--pad); min-height: 44px; display: flex; gap: 10px; align-items: center;
+  font-weight: 600; color: var(--heading);
+}
+details.audit > summary::-webkit-details-marker { display: none; }
+details.audit > summary::before { content: "+"; font: 400 16px/1 var(--font-mono); color: var(--accent); width: 1em; }
+details.audit[open] > summary::before { content: "−"; }
+details.audit .split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); padding: 0 var(--pad) var(--pad); }
+@media (min-width: 1180px) { details.audit .split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
+/* ---------------- example viewer (product and API explainers) ---------------- */
+figure.ex { margin: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; min-width: 0; }
+figure.ex figcaption { padding: 12px var(--pad); font-size: 14px; border-bottom: 1px solid var(--line); }
+.ex-part { padding: 12px var(--pad); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ex-part + .ex-part { border-top: 1px solid var(--line); background: var(--canvas); }
+.ex-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ex-bar .push { margin-left: auto; }
+.ex-bar button { font: 500 12px/1 var(--font-sans); min-height: 32px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--heading); cursor: pointer; }
+pre.json { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 13px/1.55 var(--font-mono); max-height: 28rem; overflow-y: auto; }
+.j-key { color: var(--baseline); } .j-str { color: var(--accent); } .j-num { color: var(--warn); } .j-lit { color: var(--risk); } .j-more { color: var(--muted); font-style: italic; }
+
+/* ---------------- print ---------------- */
+@media print {
+  :root[data-theme="dark"], .stage-dark {
+    color-scheme: light; --canvas: #FFFFFF; --panel: #FFFFFF; --heading: #003168; --text: #344F68; --muted: #53677A;
+    --baseline: #0051A5; --accent: #007F73; --line: #D5E1EA; --segment: #CADBEA; --control: #EAF2F8; --warn: #9A5B00; --risk: #B4232F;
+    --focal: #FFFFFF; --shadow: none;
+  }
+  :root { --canvas: #FFFFFF; --shadow: none; }
+  .appbar, .controls, .timebar, .ex-bar button, .theme-switch { display: none !important; }
+  .walkthrough > .workbench { position: static; }
+  .stage-dark { border: 1px solid var(--line); }
+  .js .fallback { display: block; }
+  section, .panel, figure { break-inside: avoid-page; }
+}
+</style>
+<!--/PAGE:HEAD-->
+</head>
+<body>
+<!--PAGE:BODY-->
+<header class="appbar">
+  <div class="shell">
+    <div class="ctx"><span class="kicker">Explainer</span><b>Why launch did not move</b></div>
+    <nav aria-label="Sections">
+      <ol id="section-nav">
+        <li><a href="#s1"><span class="idx">01</span><span class="lbl">Reading the plan</span></a></li>
+        <li><a href="#s2"><span class="idx">02</span><span class="lbl">Documentation</span></a></li>
+        <li><a href="#s3"><span class="idx">03</span><span class="lbl">Build</span></a></li>
+        <li><a href="#s4"><span class="idx">04</span><span class="lbl">The boundary</span></a></li>
+        <li><a href="#s5"><span class="idx">05</span><span class="lbl">Your plan</span></a></li>
+        <li><a href="#s6"><span class="idx">06</span><span class="lbl">Limits</span></a></li>
+      </ol>
+    </nav>
+    <div class="stepper" aria-label="Guided sequence">
+      <button type="button" data-step="-1">Back</button><button type="button" data-step="1">Next</button>
+    </div>
+    <div class="theme-switch" role="group" aria-label="Theme">
+      <button type="button" data-theme-set="light" aria-pressed="true">Light</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+</header>
+
+<main class="shell" id="top">
+
+  <!-- HERO: the conclusion in plain text; the outcome statement; 2-4 tagged baseline figures. -->
+  <header class="hero">
+    <div>
+      <p class="kicker">Programme explainer</p>
+      <h1>Speeding up a workstream only brings launch forward if launch is waiting for it</h1>
+    </div>
+    <div class="right">
+      <p class="thesis">The team halved the documentation estimate and launch did not move a day. Nothing was wrong with the documentation. Launch waits for the slowest chain of work, and documentation was not on it. <strong>After this page you should be able to look at a plan and predict, before anyone changes an estimate, whether the change will move the date.</strong></p>
+      <div class="metrics">
+        <div class="metric"><span class="kicker">Launch</span><span class="value">20<small>days</small></span><span class="note">Set by the build branch</span><span class="tag tag-illustrative">Illustrative</span></div>
+        <div class="metric"><span class="kicker">Documentation spare</span><span class="value">10<small>days</small></span><span class="note">Finished and waiting</span><span class="tag tag-illustrative">Illustrative</span></div>
+        <div class="metric"><span class="kicker">Build 8 → 4 days</span><span class="value">16<small>days</small></span><span class="note">Launch moves with it</span><span class="tag tag-modelled">Modelled</span></div>
+      </div>
+    </div>
+  </header>
+
+  <p class="callout"><span>The plan on this page is invented to make the mechanism visible; its numbers are not estimates for any real project. The model and its assumptions are under <a href="#s6">Limits</a>.</span></p>
+
+  <!-- 01: teach the visual language with the simplest case, before relying on it. -->
+  <section id="s1" aria-labelledby="s1-h">
+    <div class="section-head">
+      <h2 id="s1-h"><span class="idx">01</span>What decides the launch date?</h2>
+      <p class="takeaway">Launch happens when the last piece of required work finishes. Everything else finishes early and waits.</p>
+    </div>
+    <div class="prose">
+      <p>The plan has two branches that start together on day 0. The build branch is a chain: design, then build, then integration, then validation, each starting when the one before it finishes. Documentation runs on its own. Launch needs both.</p>
+      <p>In the figure, each bar is an activity and its length is its duration in working days. The diamond is launch. A <span class="key key-spare">hatched</span> stretch is time an activity sits finished, waiting for something else. The branch with no hatching is the one launch is waiting for; it is drawn with a <span class="key key-critical">heavier outline</span>. Step through the plan a day at a time and watch what is in progress.</p>
+    </div>
+    <figure class="figure" id="fig-steps">
+      <div class="fig-controls">
+        <div class="timebar" data-time aria-label="Day"></div>
+        <div class="presets" data-presets aria-label="Presets"></div>
+      </div>
+      <div class="fig-stage">
+        <div data-svg-host></div>
+        <p class="live" data-live aria-live="polite"></p>
+        <p class="fig-summary">Design runs from day 0 to 4, build to 12, integration to 16 and validation to 20. Documentation runs from day 0 to 10, then waits 10 days. Launch is day 20.</p>
+      </div>
+    </figure>
+    <div class="prose">
+      <p>On day 10 documentation is done, and for the next ten days it does nothing but wait. <strong>Those ten days are spare: documentation could have taken ten days longer without anyone noticing.</strong> Nothing on the build branch has any spare time at all, which is what makes it the branch that sets the date.</p>
+    </div>
+  </section>
+
+  <!-- 02: one control. A prediction first, then the action, the observation, the explanation. -->
+  <section id="s2" aria-labelledby="s2-h">
+    <div class="section-head">
+      <h2 id="s2-h"><span class="idx">02</span>Does finishing documentation sooner help?</h2>
+      <p class="takeaway">No. Documentation already finishes ten days early; finishing it earlier just adds to the wait.</p>
+    </div>
+    <div class="predict" data-demo="docs" data-preset="half" data-answer="same">
+      <p class="predict-q"><span class="kicker">Predict first</span>Someone finds a way to do the documentation in 5 days instead of 10. What happens to launch?</p>
+      <div class="seg">
+        <button type="button" class="pill" data-choice="earlier" aria-pressed="false">It comes 5 days earlier</button>
+        <button type="button" class="pill" data-choice="same" aria-pressed="false">It stays on day 20</button>
+        <button type="button" class="pill" data-choice="later" aria-pressed="false">It slips</button>
+      </div>
+      <p class="predict-a" data-reveal><span class="predict-verdict"></span> Launch stays on day 20. Documentation now finishes on day 5 and waits fifteen days instead of ten; the build branch still finishes on day 20.</p>
+    </div>
+    <figure class="figure" id="docs">
+      <div class="fig-controls">
+        <div class="control-group" data-params><p class="fig-summary">The control needs JavaScript; the result is described below the chart.</p></div>
+        <div class="presets" data-presets aria-label="Presets"></div>
+      </div>
+      <div class="fig-stage">
+        <div data-svg-host></div>
+        <p class="live" data-live aria-live="polite"></p>
+        <p class="fig-summary">With documentation at 5 days it finishes on day 5; the build branch still finishes on day 20, so launch stays on day 20.</p>
+      </div>
+    </figure>
+    <div class="prose">
+      <p>Drag the end of the documentation bar, or use the slider. Anywhere from 1 day to 20, launch does not move: <strong>whenever documentation finishes before the build branch, its duration only changes how long it waits.</strong> The ten days of spare time absorb the change, in either direction.</p>
+    </div>
+  </section>
+
+  <!-- 03: the same objects; a different single control. -->
+  <section id="s3" aria-labelledby="s3-h">
+    <div class="section-head">
+      <h2 id="s3-h"><span class="idx">03</span>Does finishing build sooner help?</h2>
+      <p class="takeaway">Yes, day for day. Build sits on the branch launch is waiting for, so every day saved there is a day saved at launch.</p>
+    </div>
+    <div class="prose">
+      <p>Same plan, same scale; now only build can change. It opens at 8 days. <button type="button" class="trigger" data-demo="build" data-preset="half">Halve it to 4 days</button> and watch the diamond.</p>
+    </div>
+    <figure class="figure" id="build">
+      <div class="fig-controls">
+        <div class="control-group" data-params><p class="fig-summary">The control needs JavaScript; the result is described below the chart.</p></div>
+        <div class="presets" data-presets aria-label="Presets"></div>
+      </div>
+      <div class="fig-stage">
+        <div data-svg-host></div>
+        <p class="live" data-live aria-live="polite"></p>
+        <p class="fig-summary">With build at 4 days the build branch finishes on day 16, and launch moves to day 16. Documentation's spare time falls from 10 days to 6.</p>
+      </div>
+    </figure>
+    <div class="prose">
+      <p>Launch moves to day 16, and the hatching on documentation shrinks from ten days to six. The four days did not vanish; they came out of documentation's spare time. Which raises the obvious question about how far that can go.</p>
+    </div>
+  </section>
+
+  <!-- 04: boundary case, as a linked comparison on one scale. -->
+  <section id="s4" aria-labelledby="s4-h">
+    <div class="section-head">
+      <h2 id="s4-h"><span class="idx">04</span>So is documentation simply unimportant?</h2>
+      <p class="takeaway">Only while it has spare time. Push it past 20 days and it becomes the branch launch waits for.</p>
+    </div>
+    <div class="prose">
+      <p>The tempting rule from the last two figures is “documentation doesn't matter, build does.” It is wrong, and the way it is wrong is the point of this page. Below, the original plan stays fixed on top; the plan underneath has its documentation estimate changed. Both use the same scale. Try <button type="button" class="trigger" data-demo="compare" data-preset="late">documentation at 22 days</button>.</p>
+    </div>
+    <figure class="figure" id="compare">
+      <div class="fig-controls">
+        <div class="control-group" data-params><p class="fig-summary">The control needs JavaScript; the result is described below the chart.</p></div>
+        <div class="presets" data-presets aria-label="Presets"></div>
+      </div>
+      <div class="fig-stage">
+        <div data-svg-host></div>
+        <p class="live" data-live aria-live="polite"></p>
+        <p class="fig-summary">With documentation at 22 days it finishes after the build branch, so launch moves from day 20 to day 22, and the build branch now has 2 days spare.</p>
+      </div>
+    </figure>
+    <div class="prose">
+      <p>At 22 days the heavy outline jumps to documentation, launch slips to day 22, and the build branch is the one with spare time. <strong>Which work matters is not a property of the work. It is a property of the current plan</strong>, and it changes the moment one branch overtakes another.</p>
+    </div>
+  </section>
+
+  <!-- 05: the sandbox comes last, after each control has been introduced alone. The one focal Midnight stage. -->
+  <section id="s5" aria-labelledby="s5-h">
+    <div class="section-head">
+      <h2 id="s5-h"><span class="idx">05</span>Will a given change move your date?</h2>
+      <p class="takeaway">Find the branch with no spare time. Changes there move launch day for day; changes elsewhere move it only once they use up the spare time.</p>
+    </div>
+    <div class="walkthrough">
+      <div class="steps">
+        <div class="prose">
+          <p>Every activity can change here, and the original plan stays drawn in dashed outline for comparison. Before you touch anything, try one case you have not seen.</p>
+          <div class="predict" data-demo="sandbox" data-preset="valslip" data-answer="moves">
+            <p class="predict-q"><span class="kicker">Predict first</span>Validation slips from 4 days to 7. Does launch move?</p>
+            <div class="seg">
+              <button type="button" class="pill" data-choice="moves" aria-pressed="false">Yes, by 3 days</button>
+              <button type="button" class="pill" data-choice="absorbed" aria-pressed="false">No, it has spare time</button>
+            </div>
+            <p class="predict-a" data-reveal><span class="predict-verdict"></span> Launch moves to day 23. Validation is on the build branch, which has no spare time, so every day it slips is a day at launch.</p>
+          </div>
+        </div>
+        <div class="prose">
+          <p>Two habits follow from the model. Before approving an effort to speed something up, ask which branch it is on and how much spare time that branch has. And when an estimate grows, ask the same question in reverse: <button type="button" class="trigger" data-demo="sandbox" data-preset="docs16">documentation growing to 16 days</button> costs nothing, while <button type="button" class="trigger" data-demo="sandbox" data-preset="integ6">integration growing to 6</button> costs two days at launch.</p>
+        </div>
+      </div>
+      <div class="workbench" id="sandbox">
+        <div class="panel controls">
+          <div class="control-group" data-params><p class="fig-summary">The controls need JavaScript.</p></div>
+          <div class="presets" data-presets aria-label="Presets"></div>
+          <div class="readout" data-readout-tiles></div>
+          <p class="live" data-live aria-live="polite"></p>
+        </div>
+        <figure class="stage stage-dark" style="margin:0">
+          <figcaption>
+            <h3>The whole plan, against the original</h3>
+            <span class="tag tag-illustrative">Illustrative durations</span>
+          </figcaption>
+          <div data-svg-host></div>
+          <p class="fig-summary">In the original plan launch is day 20, set by the build branch. Validation at 7 days moves launch to day 23; documentation at 16 days leaves launch on day 20; integration at 6 days moves it to day 22.</p>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06: what the model leaves out, and what would change the conclusion. -->
+  <section id="s6" aria-labelledby="s6-h">
+    <div class="section-head">
+      <h2 id="s6-h"><span class="idx">06</span>What does this model leave out?</h2>
+      <p class="takeaway">People. It assumes nobody works on both branches, and that is exactly where real plans most often break the rule.</p>
+    </div>
+    <div class="band">
+      <div class="panel prose">
+        <p>The model knows about durations and dependencies and nothing else. Durations are treated as known, the two branches share no people, and changing one estimate leaves the others alone. Real plans violate all three, and the third one most often: the writer who finishes the documentation early may be the same person who then helps with validation.</p>
+        <p>None of that breaks the mechanism; it changes the inputs. If shortening documentation frees someone who then shortens validation, launch moves, but because validation got shorter, not because documentation did. The question to ask stays the same: <strong>which branch has no spare time, and does this change shorten it?</strong></p>
+      </div>
+      <aside class="rail">
+        <div class="callout warn">
+          <strong>What would change the conclusion</strong>
+          <span>If documentation and build share the same people, documentation stops being independent: its duration then affects build's, and shortening it can move launch. Check who is on both branches before relying on the spare time.</span>
+        </div>
+        <details class="audit">
+          <summary>Model and assumptions</summary>
+          <div class="split">
+            <div class="prose" style="font-size:16px">
+              <p>Launch day = max(design + build + integration + validation, documentation). Each activity on the build branch starts when the previous one finishes; documentation starts on day 0. Spare time on a branch = launch − that branch's finish.</p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Activity</th><th class="n">Days</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>Design</td><td class="n">4</td><td><span class="tag tag-illustrative">Illustrative</span></td></tr>
+                  <tr><td>Build</td><td class="n">8</td><td><span class="tag tag-illustrative">Illustrative</span></td></tr>
+                  <tr><td>Integration</td><td class="n">4</td><td><span class="tag tag-illustrative">Illustrative</span></td></tr>
+                  <tr><td>Validation</td><td class="n">4</td><td><span class="tag tag-illustrative">Illustrative</span></td></tr>
+                  <tr><td>Documentation</td><td class="n">10</td><td><span class="tag tag-illustrative">Illustrative</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+      </aside>
+    </div>
+  </section>
+
+  <!-- OPTIONAL: example viewer for product and API explainers. Delete this section if unused.
+       Each figure.ex names an id in the #examples JSON block and the fields to show first. -->
+  <section id="example-viewer-demo" hidden>
+    <figure class="ex" data-ex="lookup_order" data-keys="status,lines"><figcaption>A real call and its real response. Selected fields first.</figcaption></figure>
+  </section>
+
+</main>
+
+<script type="application/json" id="examples">{"lookup_order":{"tool":"lookup_order","arguments":{"order_id":"FR-10042"},"response":{"status":"shipped","lines":[{"sku":"BX-200","qty":2}],"carrier":"Ferrow Freight"},"is_error":false}}</script>
+
+
+
+<script>
+(function () {
+  "use strict";
+  document.documentElement.classList.add("js");
+  var root = document.documentElement;
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function el(tag, attrs, html) {
+    var n = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+    if (html !== undefined) n.innerHTML = html;
+    return n;
+  }
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function svg(tag, attrs, parent) {
+    var n = document.createElementNS(SVGNS, tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function fmt(v, digits) { return Number(v).toLocaleString("en-GB", { minimumFractionDigits: digits || 0, maximumFractionDigits: digits || 0 }); }
+
+  /* ====================================================================
+     Demo: reusable demonstration framework.
+     Each demo supplies params, presets, a pure model(), render(), describe().
+     Every interaction runs: update state -> model -> render -> labels.
+     ==================================================================== */
+  var Demo = (function () {
+    var registry = {};
+    function create(cfg) {
+      var rootEl = document.querySelector(cfg.root);
+      if (!rootEl) return null;
+      var params = {}, defs = cfg.params, view = cfg.view ? JSON.parse(JSON.stringify(cfg.view)) : {};
+      Object.keys(defs).forEach(function (k) { params[k] = defs[k].value; });
+      var time = cfg.time ? { t: cfg.time.start != null ? cfg.time.start : cfg.time.min, playing: false } : null;
+      var result = null, dirtyModel = true, frame = 0, width = 0, activePreset = cfg.initialPreset || null;
+      var inputs = {}, outputs = {};
+
+      // Controls generated from parameter definitions, so labels, units and ranges never drift.
+      var host = rootEl.querySelector("[data-params]");
+      if (host) host.innerHTML = "";
+      // Parameter types: "range" (default) is a slider; "choice" is a button group with
+      // d.options = [{value, label}]; "toggle" is an on/off switch (value true/false).
+      Object.keys(defs).forEach(function (k) {
+        var d = defs[k], id = rootEl.id + "-" + k, type = d.type || "range";
+        var tag = d.evidence ? ' <span class="tag tag-' + d.evidence + '">' + d.evidence + "</span>" : "";
+        var wrap = el("div", { class: "ctl ctl-" + type });
+        var head = el("div", { class: "ctl-head" });
+        var out = el("output", { for: id });
+        if (type === "range") {
+          head.appendChild(el("label", { for: id }, esc(d.label) + tag)); head.appendChild(out);
+          var input = el("input", { type: "range", id: id, min: d.min, max: d.max, step: d.step, value: d.value });
+          input.addEventListener("input", function () { set(k, Number(input.value), { clearPreset: true }); });
+          wrap.appendChild(head); wrap.appendChild(input);
+          inputs[k] = input;
+        } else if (type === "choice") {
+          var gid = id + "-label";
+          head.appendChild(el("span", { id: gid, class: "ctl-label" }, esc(d.label) + tag)); head.appendChild(out);
+          var group = el("div", { class: "seg", role: "group", "aria-labelledby": gid, id: id });
+          d.options.forEach(function (o) {
+            var b = el("button", { type: "button", class: "pill", "data-value": String(o.value), "aria-pressed": "false" }, esc(o.label));
+            b.addEventListener("click", function () { set(k, o.value, { clearPreset: true }); });
+            group.appendChild(b);
+          });
+          wrap.appendChild(head); wrap.appendChild(group);
+          inputs[k] = group;
+        } else {
+          var sw = el("button", { type: "button", class: "switch", id: id, role: "switch", "aria-checked": String(!!d.value) },
+            '<span class="switch-track" aria-hidden="true"></span><span>' + esc(d.label) + "</span>" + tag);
+          sw.addEventListener("click", function () { set(k, !params[k], { clearPreset: true }); });
+          wrap.appendChild(sw);
+          inputs[k] = sw;
+        }
+        if (d.help) wrap.appendChild(el("p", { class: "ctl-help" }, esc(d.help)));
+        if (host) host.appendChild(wrap);
+        outputs[k] = out;
+      });
+
+      var presetHost = rootEl.querySelector("[data-presets]");
+      if (presetHost && cfg.presets) {
+        Object.keys(cfg.presets).forEach(function (name) {
+          if (cfg.presets[name].hidden) return;   // reachable only from prose triggers
+          var b = el("button", { type: "button", class: "pill", "data-preset": name, "aria-pressed": "false" }, esc(cfg.presets[name].label || name));
+          b.addEventListener("click", function () { applyPreset(name); });
+          presetHost.appendChild(b);
+        });
+      }
+      // Every figure gets a reset to its explicit baseline.
+      if (presetHost) {
+        var rb = el("button", { type: "button", class: "pill pill-reset" }, "Reset");
+        rb.addEventListener("click", function () { reset(); });
+        presetHost.appendChild(rb);
+      }
+
+      // Time controls: a scrubber plus play/pause/reset. Scrubbing computes state directly from t.
+      var timeInput = null, playBtn = null, last = 0;
+      if (time) {
+        var th = rootEl.querySelector("[data-time]");
+        var tid = rootEl.id + "-time";
+        var tw = el("div", { class: "ctl" });   // CSS gives the scrubber its own row; buttons sit beneath
+        var thd = el("div", { class: "ctl-head" });
+        thd.appendChild(el("label", { for: tid }, esc(cfg.time.label)));
+        var tout = el("output", { for: tid });
+        thd.appendChild(tout);
+        timeInput = el("input", { type: "range", id: tid, min: cfg.time.min, max: cfg.time.max, step: cfg.time.step, value: time.t });
+        timeInput.addEventListener("input", function () { pause(); setTime(Number(timeInput.value)); });
+        tw.appendChild(thd); tw.appendChild(timeInput);
+        playBtn = el("button", { type: "button", class: "pill", "aria-pressed": "false" }, "Play");
+        playBtn.addEventListener("click", function () { time.playing ? pause() : play(); });
+        th.appendChild(tw); th.appendChild(playBtn);
+        // Event stepping: cfg.time.events lists the moments worth stopping at.
+        if (cfg.time.events) {
+          [["Previous event", -1], ["Next event", 1]].forEach(function (pair) {
+            var eb = el("button", { type: "button", class: "pill" }, pair[0]);
+            eb.addEventListener("click", function () {
+              pause();
+              var ev = cfg.time.events.slice().sort(function (a, b) { return a - b; });
+              var target = pair[1] > 0 ? ev.filter(function (e) { return e > time.t + 1e-9; })[0] : ev.filter(function (e) { return e < time.t - 1e-9; }).pop();
+              if (target !== undefined) setTime(target);
+            });
+            th.appendChild(eb);
+          });
+        }
+        if (!presetHost) {
+          var resetBtn = el("button", { type: "button", class: "pill" }, "Reset");
+          resetBtn.addEventListener("click", reset);
+          th.appendChild(resetBtn);
+        }
+        time.out = tout;
+      }
+
+      function syncControls() {
+        Object.keys(defs).forEach(function (k) {
+          var d = defs[k], type = d.type || "range", v = params[k];
+          if (type === "range") inputs[k].value = v;
+          else if (type === "choice") inputs[k].querySelectorAll("[data-value]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.value === String(v))); });
+          else inputs[k].setAttribute("aria-checked", String(!!v));
+          if (type === "toggle") return;
+          // d.format(v) returns the text for the value readout; otherwise number + unit.
+          // A choice already shows its value as the pressed button, so it has no readout unless format() gives one.
+          outputs[k].innerHTML = d.format ? esc(d.format(v)) : type === "choice" ? "" : fmt(v, d.digits) + (d.unit ? " <small>" + esc(d.unit) + "</small>" : "");
+        });
+        document.querySelectorAll("[data-preset]").forEach(function (b) {
+          if (rootEl.contains(b) || b.dataset.demo === cfg.name) b.setAttribute("aria-pressed", String(b.dataset.preset === activePreset));
+        });
+        // Narrative state follows model state: the prose step for the active preset is marked.
+        document.querySelectorAll('[data-step-demo="' + cfg.name + '"]').forEach(function (p) {
+          p.classList.toggle("is-active", p.dataset.stepPreset === activePreset);
+        });
+        if (time) { timeInput.value = time.t; time.out.textContent = cfg.time.format(time.t); }
+      }
+      function schedule() {
+        if (frame) return;
+        frame = requestAnimationFrame(function () {
+          frame = 0;
+          if (dirtyModel) { result = cfg.model(params); dirtyModel = false; }
+          syncControls();
+          cfg.render(result, { params: params, view: view, t: time ? time.t : null }, { root: rootEl, width: width, api: api });
+          var text = cfg.describe(result, { params: params, view: view, t: time ? time.t : null, preset: activePreset });
+          var live = rootEl.querySelector("[data-live]");
+          if (live && live.textContent !== text) live.textContent = text;
+        });
+      }
+      function set(name, value, opts) {
+        var d = defs[name];
+        if (!d.type || d.type === "range") value = Math.min(d.max, Math.max(d.min, Math.round(value / d.step) * d.step));
+        if (params[name] === value) return;
+        params[name] = value; dirtyModel = true;
+        if (opts && opts.clearPreset) activePreset = null;
+        schedule();
+      }
+      function setView(patch) { Object.keys(patch).forEach(function (k) { view[k] = patch[k]; }); schedule(); }
+      function setTime(t) { if (!time) return; time.t = Math.min(cfg.time.max, Math.max(cfg.time.min, t)); schedule(); }
+      function applyPreset(name) {
+        var p = cfg.presets[name]; if (!p) return;
+        Object.keys(p.params).forEach(function (k) { params[k] = p.params[k]; });
+        if (time && p.t !== undefined) time.t = p.t;
+        if (p.view) setView(p.view);
+        activePreset = name; dirtyModel = true; schedule();
+      }
+      function reset() {
+        pause(); view = cfg.view ? JSON.parse(JSON.stringify(cfg.view)) : {};
+        if (time) time.t = cfg.time.start != null ? cfg.time.start : cfg.time.min;
+        if (cfg.initialPreset) { applyPreset(cfg.initialPreset); return; }
+        Object.keys(defs).forEach(function (k) { params[k] = defs[k].value; });
+        activePreset = null; dirtyModel = true; schedule();
+      }
+      function tick(now) {
+        if (!time.playing) return;
+        var dt = last ? (now - last) / 1000 : 0; last = now;
+        var next = time.t + dt * cfg.time.rate;          // elapsed-time based: same speed at any refresh rate
+        if (next >= cfg.time.max) { setTime(cfg.time.max); pause(); return; }
+        setTime(next);
+        requestAnimationFrame(tick);
+      }
+      function play() {
+        if (!time || time.playing) return;                // never start a second loop
+        if (time.t >= cfg.time.max) time.t = cfg.time.min;
+        if (reduceMotion) { setTime(cfg.time.max); return; }
+        time.playing = true; last = 0; playBtn.textContent = "Pause"; playBtn.setAttribute("aria-pressed", "true");
+        requestAnimationFrame(tick);
+      }
+      function pause() { if (!time || !time.playing) return; time.playing = false; playBtn.textContent = "Play"; playBtn.setAttribute("aria-pressed", "false"); }
+
+      // Redraw from the container's real width; pause playback when the figure is off screen.
+      var stageHost = rootEl.querySelector("[data-svg-host]");
+      if (window.ResizeObserver && stageHost) {
+        new ResizeObserver(function (entries) {
+          var w = Math.round(entries[0].contentRect.width);
+          if (w && w !== width) { width = w; schedule(); }
+        }).observe(stageHost);
+      } else { width = stageHost ? stageHost.clientWidth : 640; }
+      if (window.IntersectionObserver) {
+        new IntersectionObserver(function (entries) { if (!entries[0].isIntersecting) pause(); }).observe(rootEl);
+      }
+
+      var api = { set: set, setView: setView, setTime: setTime, applyPreset: applyPreset, reset: reset, params: params, defs: defs };
+      registry[cfg.name] = api;
+      if (cfg.initialPreset) applyPreset(cfg.initialPreset); else schedule();
+      return api;
+    }
+    // Prose triggers anywhere on the page route through the same applyPreset().
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest("button.trigger[data-demo]");
+      if (b && registry[b.dataset.demo]) registry[b.dataset.demo].applyPreset(b.dataset.preset);
+    });
+    return { create: create, get: function (n) { return registry[n]; } };
+  })();
+
+  /* Prediction prompts. Markup: <div class="predict" data-demo="name" data-preset="key" data-answer="choice">
+     with buttons [data-choice] and an answer paragraph [data-reveal] (visible without JavaScript and in print).
+     Choosing commits the reader, then moves the named figure to the case and reveals the explanation. */
+  document.querySelectorAll(".predict").forEach(function (box) {
+    var verdict = box.querySelector(".predict-verdict");
+    box.querySelectorAll("[data-choice]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        box.querySelectorAll("[data-choice]").forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+        if (verdict) verdict.textContent = b.dataset.choice === box.dataset.answer ? "Right." : "Not quite.";
+        box.classList.add("answered");
+        var demo = Demo.get(box.dataset.demo);
+        if (demo && box.dataset.preset) demo.applyPreset(box.dataset.preset);
+      });
+    });
+  });
+
+  /* ====================================================================
+     Example model: a two-branch plan. Pure function, no DOM.
+     Every figure on the page uses this one model and this one renderer,
+     so the same activities keep the same names, rows and colours throughout.
+     ==================================================================== */
+  var ACTS = [
+    { id: "design", label: "Design", branch: "build" },
+    { id: "build", label: "Build", branch: "build" },
+    { id: "integ", label: "Integration", branch: "build" },
+    { id: "valid", label: "Validation", branch: "build" },
+    { id: "docs", label: "Documentation", branch: "docs" }
+  ];
+  var BASE = { design: 4, build: 8, integ: 4, valid: 4, docs: 10 };
+  function planModel(p) {
+    var d = {}, t = 0, acts = [];
+    ACTS.forEach(function (a) { d[a.id] = p[a.id] != null ? p[a.id] : BASE[a.id]; });
+    ACTS.forEach(function (a) {
+      if (a.branch !== "build") return;
+      acts.push({ id: a.id, label: a.label, branch: a.branch, start: t, end: t + d[a.id] });
+      t += d[a.id];
+    });
+    acts.push({ id: "docs", label: "Documentation", branch: "docs", start: 0, end: d.docs });
+    var buildEnd = t, launch = Math.max(buildEnd, d.docs);
+    return {
+      acts: acts, d: d, launch: launch, buildEnd: buildEnd, docsEnd: d.docs,
+      controlling: buildEnd > d.docs ? "build" : d.docs > buildEnd ? "docs" : "both",
+      spare: { build: launch - buildEnd, docs: launch - d.docs }
+    };
+  }
+  var BASELINE = planModel(BASE);
+  var BRANCH_NAME = { build: "the build branch", docs: "documentation", both: "both branches equally" };
+  function days(n) { return n + (n === 1 ? " day" : " days"); }
+
+  /* Renderer: draws one or more plans on a single shared day scale.
+     blocks: [{ title, r, editable, ghost }]. t: optional day for the stepper. */
+  var hatchSeq = 0;
+  function drawPlans(host, blocks, ctx, opts) {
+    opts = opts || {};
+    var focusId = host.contains(document.activeElement) ? document.activeElement.getAttribute("data-id") : null;
+    var W = Math.max(300, ctx.width || 640), narrow = W < 560;
+    var labelW = narrow ? 92 : 124, padR = narrow ? 16 : 96, rowH = narrow ? 24 : 28, gap = 8;
+    var maxDay = opts.maxDay || 32;
+    blocks.forEach(function (b) { maxDay = Math.max(maxDay, Math.ceil((b.r.launch + 2) / 4) * 4); });
+    var x = function (day) { return labelW + day / maxDay * (W - labelW - padR); };
+    var blockH = 5 * rowH + 4 * gap + 14, titleH = blocks.length > 1 ? 22 : 0;
+    var H = blocks.length * (blockH + titleH) + (blocks.length - 1) * 18 + 34;
+    host.innerHTML = "";
+    var s = svg("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": opts.label || "Plan timeline" }, host);
+    var hid = "hatch-" + (++hatchSeq);
+    var defs = svg("defs", {}, s), pat = svg("pattern", { id: hid, width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+    svg("rect", { width: 6, height: 6, class: "hatch-bg" }, pat);
+    svg("line", { x1: 0, y1: 0, x2: 0, y2: 6, class: "hatch-line" }, pat);
+
+    // Day grid, shared by every block.
+    var top = 0;
+    for (var g = 0; g <= maxDay; g += 4) {
+      svg("line", { x1: x(g), x2: x(g), y1: 0, y2: H - 26, class: "grid" }, s);
+      if (!narrow || g % 8 === 0) svg("text", { x: x(g), y: H - 8, "text-anchor": "middle", class: "lbl" }, s).textContent = "Day " + g;
+    }
+
+    blocks.forEach(function (b, bi) {
+      var r = b.r, y0 = top + titleH;
+      if (titleH) svg("text", { x: 0, y: top + 14, class: "lbl-strong" }, s).textContent = b.title;
+      var rowY = function (i) { return y0 + i * (rowH + gap) + (i === 4 ? 14 : 0); };   // a little gap before documentation
+      r.acts.forEach(function (a, i) {
+        var y = rowY(i), crit = r.controlling === a.branch || r.controlling === "both";
+        svg("text", { x: 0, y: y + rowH / 2 + 4, class: "row-lbl" }, s).textContent = a.label;
+        if (b.ghost) {
+          var ga = b.ghost.acts[i];
+          svg("rect", { x: x(ga.start), y: y + 1, width: Math.max(1, x(ga.end) - x(ga.start)), height: rowH - 2, class: "ghost", rx: 2 }, s);
+        }
+        var t = opts.t;
+        var cls = "act" + (b.editable === a.id ? " act-edit" : "") + (crit ? " crit" : "");
+        if (t == null || t >= a.end) {
+          svg("rect", { x: x(a.start), y: y, width: Math.max(1, x(a.end) - x(a.start)), height: rowH, rx: 2, class: cls, "data-id": "bar-" + a.id }, s);
+        } else {
+          svg("rect", { x: x(a.start), y: y, width: Math.max(1, x(a.end) - x(a.start)), height: rowH, rx: 2, class: cls + " todo" }, s);
+          if (t > a.start) svg("rect", { x: x(a.start), y: y, width: x(t) - x(a.start), height: rowH, rx: 2, class: cls }, s);
+        }
+        // Spare time: drawn after the last activity of a branch that finishes before launch.
+        var last = a.branch === "docs" || a.id === "valid";
+        var spare = r.spare[a.branch];
+        if (last && spare > 0 && (t == null || t > a.end)) {
+          var until = t == null ? r.launch : Math.min(t, r.launch);
+          svg("rect", { x: x(a.end), y: y + 3, width: Math.max(0, x(until) - x(a.end)), height: rowH - 6, fill: "url(#" + hid + ")", class: "spare" }, s);
+          if (t == null || t >= r.launch) {
+            var lx = (x(a.end) + x(r.launch)) / 2;
+            if (x(r.launch) - x(a.end) > 70) svg("text", { x: lx, y: y + rowH / 2 + 4, "text-anchor": "middle", class: "spare-lbl" }, s).textContent = days(spare) + " spare";
+          }
+        }
+        // Direct manipulation: drag the end of the editable bar.
+        if (b.editable === a.id && t == null) {
+          var hx = x(a.end), hs = 48 / ((ctx.width || W) / W);   // 48 px on screen, whatever the scale
+          svg("rect", { x: hx - hs / 2, y: y + rowH / 2 - hs / 2, width: hs, height: hs, class: "drag-hit", "data-id": "handle-" + a.id, "data-start": a.start,
+                        tabindex: 0, role: "slider", "aria-label": a.label + " duration in days", "aria-valuenow": a.end - a.start }, s);
+          svg("rect", { x: hx - 4, y: y - 3, width: 8, height: rowH + 6, rx: 3, class: "drag-handle" }, s);
+        }
+      });
+      // Launch marker, across this block.
+      var lxp = x(r.launch), yTop = rowY(0) - 6, yBot = rowY(4) + rowH + 6;
+      if (opts.t == null || opts.t >= r.launch) {
+        svg("line", { x1: lxp, x2: lxp, y1: yTop, y2: yBot, class: "launch-line" }, s);
+        svg("path", { d: "M" + lxp + " " + (yTop - 9) + " l7 7 l-7 7 l-7 -7 z", class: "launch" }, s);
+        svg("text", { x: lxp + 10, y: yTop - 1, class: "lbl-strong launch-lbl" }, s).textContent = "Launch day " + r.launch;
+      }
+      if (b.ghost && b.ghost.launch !== r.launch) {
+        var gx = x(b.ghost.launch);
+        svg("line", { x1: gx, x2: gx, y1: yTop, y2: yBot, class: "ghost-launch" }, s);
+      }
+      top += blockH + titleH + 18;
+    });
+    if (opts.t != null) {
+      svg("line", { x1: x(opts.t), x2: x(opts.t), y1: 0, y2: H - 26, class: "cursor" }, s);
+    }
+    if (focusId) { var f = s.querySelector('[data-id="' + focusId + '"]'); if (f) f.focus(); }
+    return { x: x, maxDay: maxDay, labelW: labelW, padR: padR, W: W };
+  }
+
+  // Drag and keyboard for the editable bar end, bound once to the persistent host.
+  function bindBarDrag(host, api, param) {
+    if (host._barBound) return;
+    host._barBound = true;
+    var dragging = null;
+    function toDay(e) {
+      var svgEl = host.querySelector("svg"), p = svgEl.createSVGPoint();
+      p.x = e.clientX; p.y = e.clientY;
+      var pt = p.matrixTransform(svgEl.getScreenCTM().inverse()), g = host._geom;
+      return (pt.x - g.labelW) / (g.W - g.labelW - g.padR) * g.maxDay;
+    }
+    host.addEventListener("pointerdown", function (e) {
+      var h = e.target.closest(".drag-hit"); if (!h) return;
+      e.preventDefault(); dragging = { id: e.pointerId, start: Number(h.getAttribute("data-start")) };
+      host.setPointerCapture(e.pointerId);
+    });
+    host.addEventListener("pointermove", function (e) { if (dragging && dragging.id === e.pointerId) api.set(param, toDay(e) - dragging.start, { clearPreset: true }); });
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (n) { host.addEventListener(n, function () { dragging = null; }); });
+    host.addEventListener("keydown", function (e) {
+      if (!e.target.closest(".drag-hit")) return;
+      var v = api.params[param], step = e.shiftKey ? 5 : 1;
+      if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); api.set(param, v + step, { clearPreset: true }); }
+      if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); api.set(param, v - step, { clearPreset: true }); }
+    });
+  }
+
+  function figure(name, root, editable, extra) {
+    var cfg = {
+      name: name, root: root, model: planModel,
+      render: function (r, state, ctx) {
+        var host = ctx.root.querySelector("[data-svg-host]");
+        host._geom = drawPlans(host, [{ r: r, editable: editable }], ctx, { label: "Plan with " + (editable ? editable + " adjustable" : "every activity") });
+        if (editable) bindBarDrag(host, ctx.api, editable);
+      },
+      describe: function (r) {
+        var waiting = r.controlling === "build" ? "docs" : r.controlling === "docs" ? "build" : null;
+        return "Documentation finishes on day " + r.docsEnd + "; the build branch on day " + r.buildEnd + ". Launch is day " + r.launch +
+          ", set by " + BRANCH_NAME[r.controlling] + (waiting ? "; " + (waiting === "docs" ? "documentation" : "the build branch") + " has " + days(r.spare[waiting]) + " spare." : ".");
+      }
+    };
+    Object.keys(extra).forEach(function (k) { cfg[k] = extra[k]; });
+    return Demo.create(cfg);
+  }
+
+  // Figure 1: the encoding, stepped through in time. No model inputs at all.
+  Demo.create({
+    name: "steps", root: "#fig-steps", params: {}, model: function () { return BASELINE; },
+    time: { label: "Day", min: 0, max: 20, step: 0.5, start: 20, rate: 4, events: [0, 4, 10, 12, 16, 20], format: function (t) { return "Day " + fmt(t, t % 1 ? 1 : 0); } },
+    render: function (r, state, ctx) {
+      var host = ctx.root.querySelector("[data-svg-host]");
+      host._geom = drawPlans(host, [{ r: r }], ctx, { t: state.t, label: "The plan on day " + state.t });
+    },
+    describe: function (r, s) {
+      var t = s.t, doing = [], waiting = [];
+      r.acts.forEach(function (a) {
+        if (a.start <= t && t < a.end) doing.push(a.label + " (day " + fmt(t - a.start + 1, 0) + " of " + (a.end - a.start) + ")");
+      });
+      if (t > r.docsEnd && t < r.launch) waiting.push("documentation has been finished for " + days(t - r.docsEnd) + " and is waiting");
+      if (t >= r.launch) return "Day " + r.launch + ": everything is finished and launch happens. Documentation waited " + days(r.spare.docs) + "; nothing on the build branch waited at all.";
+      return "Day " + fmt(t, t % 1 ? 1 : 0) + ": " + (doing.length ? doing.join(" and ") + " in progress" : "nothing in progress") + (waiting.length ? "; " + waiting[0] : "") + ".";
+    }
+  });
+
+  // Figures 2 and 3: one control each, on the same objects and scale.
+  figure("docs", "#docs", "docs", {
+    params: { docs: { label: "Documentation", unit: "days", min: 1, max: 28, step: 1, value: 10, evidence: "illustrative" } },
+    presets: { base: { label: "As estimated", params: { docs: 10 } }, half: { label: "Halve it", params: { docs: 5 } } },
+    initialPreset: "base"
+  });
+  figure("build", "#build", "build", {
+    params: { build: { label: "Build", unit: "days", min: 1, max: 16, step: 1, value: 8, evidence: "illustrative" } },
+    presets: { base: { label: "As estimated", params: { build: 8 } }, half: { label: "Halve it", params: { build: 4 } } },
+    initialPreset: "base"
+  });
+
+  // Figure 4: boundary case as a linked comparison. The original plan stays fixed above.
+  Demo.create({
+    name: "compare", root: "#compare", model: planModel,
+    params: { docs: { label: "Documentation", unit: "days", min: 1, max: 28, step: 1, value: 10, evidence: "illustrative" } },
+    presets: { base: { label: "As estimated", params: { docs: 10 } }, late: { label: "22 days", params: { docs: 22 } } },
+    initialPreset: "base",
+    render: function (r, state, ctx) {
+      var host = ctx.root.querySelector("[data-svg-host]");
+      host._geom = drawPlans(host, [{ title: "ORIGINAL PLAN", r: BASELINE }, { title: "WITH THIS DOCUMENTATION ESTIMATE", r: r, editable: "docs" }], ctx,
+                             { maxDay: 32, label: "Original plan compared with the changed plan" });
+      bindBarDrag(host, ctx.api, "docs");
+    },
+    describe: function (r) {
+      var delta = r.launch - BASELINE.launch;
+      return "Launch is day " + r.launch + (delta ? " (" + (delta > 0 ? days(delta) + " later" : days(-delta) + " earlier") + " than the original)" : ", the same as the original") +
+        ", set by " + BRANCH_NAME[r.controlling] + "." + (r.controlling === "docs" ? " The build branch now has " + days(r.spare.build) + " spare." : "");
+    }
+  });
+
+  // Figure 5: the sandbox comes last, once each control has been met alone.
+  Demo.create({
+    name: "sandbox", root: "#sandbox", model: planModel,
+    params: {
+      design: { label: "Design", unit: "days", min: 1, max: 10, step: 1, value: 4, evidence: "illustrative" },
+      build: { label: "Build", unit: "days", min: 1, max: 16, step: 1, value: 8, evidence: "illustrative" },
+      integ: { label: "Integration", unit: "days", min: 1, max: 10, step: 1, value: 4, evidence: "illustrative" },
+      valid: { label: "Validation", unit: "days", min: 1, max: 10, step: 1, value: 4, evidence: "illustrative" },
+      docs: { label: "Documentation", unit: "days", min: 1, max: 30, step: 1, value: 10, evidence: "illustrative" }
+    },
+    presets: {
+      base: { label: "Original plan", params: BASE },
+      valslip: { hidden: true, params: { design: 4, build: 8, integ: 4, valid: 7, docs: 10 } },
+      docs16: { hidden: true, params: { design: 4, build: 8, integ: 4, valid: 4, docs: 16 } },
+      integ6: { hidden: true, params: { design: 4, build: 8, integ: 6, valid: 4, docs: 10 } }
+    },
+    initialPreset: "base",
+    render: function (r, state, ctx) {
+      var host = ctx.root.querySelector("[data-svg-host]");
+      host._geom = drawPlans(host, [{ r: r, ghost: BASELINE }], ctx, { label: "Your plan, with the original in dashed outline" });
+      var delta = r.launch - BASELINE.launch, other = r.controlling === "docs" ? "build" : "docs";
+      ctx.root.querySelector("[data-readout-tiles]").innerHTML =
+        '<div><span class="kicker">Launch</span><span class="v">' + r.launch + '<small>day</small></span></div>' +
+        '<div><span class="kicker">Against original</span><span class="v">' + (delta === 0 ? "±0" : (delta > 0 ? "+" : "−") + Math.abs(delta)) + '<small>days</small></span></div>' +
+        '<div><span class="kicker">Set by</span><span class="v v-text">' + (r.controlling === "docs" ? "Docs" : r.controlling === "build" ? "Build branch" : "Both") + '</span></div>' +
+        '<div><span class="kicker">Spare elsewhere</span><span class="v">' + r.spare[other] + '<small>days</small></span></div>';
+    },
+    describe: function (r, s) {
+      var delta = r.launch - BASELINE.launch;
+      return (s.preset ? "In this case" : "With these estimates") + ", launch is day " + r.launch + ", " +
+        (delta === 0 ? "the same as the original" : days(Math.abs(delta)) + (delta > 0 ? " later" : " earlier") + " than the original") +
+        ". It is set by " + BRANCH_NAME[r.controlling] + ".";
+    }
+  });
+
+
+  /* ====================================================================
+     Example viewer: real call + real response, selected fields first.
+     ==================================================================== */
+  var EX = {};
+  try { EX = JSON.parse((document.getElementById("examples") || {}).textContent || "{}"); } catch (e) { EX = {}; }
+  function isFlat(v) { var vals = Array.isArray(v) ? v : Object.keys(v).map(function (k) { return v[k]; }); return vals.every(function (x) { return x === null || typeof x !== "object"; }) && JSON.stringify(v).length < 72; }
+  function jsonHtml(v, d) {
+    var pad = "  ".repeat(d), pad2 = "  ".repeat(d + 1);
+    if (v === null) return '<span class="j-lit">null</span>';
+    if (typeof v === "string") return '<span class="j-str">' + esc(JSON.stringify(v)) + "</span>";
+    if (typeof v === "number") return '<span class="j-num">' + v + "</span>";
+    if (typeof v === "boolean") return '<span class="j-lit">' + v + "</span>";
+    var key = function (k) { return '<span class="j-key">' + esc(JSON.stringify(k)) + "</span>"; };
+    if (Array.isArray(v)) {
+      if (!v.length) return "[]";
+      if (isFlat(v)) return "[" + v.map(function (x) { return jsonHtml(x, 0); }).join(", ") + "]";
+      return "[\n" + v.map(function (x) { return pad2 + jsonHtml(x, d + 1); }).join(",\n") + "\n" + pad + "]";
+    }
+    var ks = Object.keys(v); if (!ks.length) return "{}";
+    if (isFlat(v)) return "{ " + ks.map(function (k) { return key(k) + ": " + jsonHtml(v[k], 0); }).join(", ") + " }";
+    return "{\n" + ks.map(function (k) { return pad2 + key(k) + ": " + jsonHtml(v[k], d + 1); }).join(",\n") + "\n" + pad + "}";
+  }
+  // A chip summarising a response: its status-like field if it has one, and its error type.
+  // Extend STATUS_KIND with the product's own status values and how each should read.
+  function statusChip(r, isError) {
+    // Inside the function so it works when called from code that runs before this section.
+    var STATUS_KIND = { match_found: "ok", compared: "ok", success: "ok", ok: "ok", confirmed_absent: "", absent_from_both: "",
+      present_in_one_file_only: "", partially_compared: "", inconclusive: "warn", ambiguous_alignment: "warn", partial: "warn", failed: "risk", error: "risk" };
+    if (!r || typeof r !== "object") return "";
+    var label = r.comparison_status || r.outcome || r.status, out = "";
+    if (typeof label === "string") out += '<span class="chip ' + (STATUS_KIND[label] || "") + '">' + esc(label) + "</span> ";
+    var errType = r.error && (r.error.type || r.error.code);
+    if (errType) out += '<span class="chip risk">' + esc(errType) + "</span>";
+    else if (isError) out += '<span class="chip risk">error</span>';
+    return out;
+  }
+  function pick(obj, path) { return path.split(".").reduce(function (c, p) { return c == null ? undefined : c[p]; }, obj); }
+  document.querySelectorAll("figure.ex").forEach(function (fig) {
+    var item = EX[fig.dataset.ex];
+    if (!item) { fig.appendChild(el("div", { class: "ex-part" }, "<em>Example not available.</em>")); return; }
+    var keys = (fig.dataset.keys || "").split(",").filter(Boolean);
+    var call = el("div", { class: "ex-part" });
+    var cbar = el("div", { class: "ex-bar" }, '<span class="kicker">Call</span><b class="mono">' + esc(item.tool) + "</b>");
+    var copy = el("button", { type: "button", class: "push" }, "Copy arguments");
+    copy.addEventListener("click", function () {
+      try { navigator.clipboard.writeText(JSON.stringify(item.arguments, null, 2)).then(function () { copy.textContent = "Copied"; }, function () { copy.textContent = "Select and copy"; }); }
+      catch (e) { copy.textContent = "Select and copy"; }
+    });
+    cbar.appendChild(copy); call.appendChild(cbar); call.appendChild(el("pre", { class: "json" }, jsonHtml(item.arguments, 0)));
+    var res = el("div", { class: "ex-part" });
+    var rbar = el("div", { class: "ex-bar" }, '<span class="kicker">Response</span>' + statusChip(item.response, item.is_error));
+    var toggle = el("button", { type: "button", class: "push" }, "Show whole response");
+    var pre = el("pre", { class: "json" }), whole = false;
+    function draw() {
+      if (whole || !keys.length) { pre.innerHTML = jsonHtml(item.response, 0); return; }
+      var sub = {}; keys.forEach(function (k) { var v = pick(item.response, k); if (v !== undefined) sub[k] = v; });
+      pre.innerHTML = jsonHtml(sub, 0) + '\n<span class="j-more">… selected fields; ' + Object.keys(item.response).length + " top-level fields in all</span>";
+    }
+    toggle.addEventListener("click", function () { whole = !whole; toggle.textContent = whole ? "Show selected fields" : "Show whole response"; draw(); });
+    if (!keys.length) toggle.hidden = true;
+    rbar.appendChild(toggle); res.appendChild(rbar); res.appendChild(pre); draw();
+    fig.appendChild(call); fig.appendChild(res);
+  });
+
+  /* ====================================================================
+     Chrome: theme switch (state survives because only tokens change),
+     section highlight, optional guided stepper, print handling.
+     ==================================================================== */
+  function setTheme(name) {
+    root.setAttribute("data-theme", name);
+    document.querySelectorAll("[data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.themeSet === name)); });
+    try { localStorage.setItem("explainer-theme", name); } catch (e) { /* storage unavailable: fine */ }
+  }
+  document.querySelectorAll("[data-theme-set]").forEach(function (b) { b.addEventListener("click", function () { setTheme(b.dataset.themeSet); }); });
+  // Light first: a remembered explicit choice is honoured; the OS dark-mode setting is not.
+  try { var saved = localStorage.getItem("explainer-theme"); if (saved === "dark") setTheme("dark"); } catch (e) { /* ignore */ }
+
+  // Show section numbers only when the labels would not fit in the bar.
+  var navEl = document.querySelector(".appbar nav");
+  function fitNav() {
+    if (!navEl) return;
+    navEl.classList.remove("compact");
+    if (navEl.scrollWidth > navEl.clientWidth + 1) navEl.classList.add("compact");
+  }
+  fitNav();
+  if (window.ResizeObserver && navEl) new ResizeObserver(fitNav).observe(document.querySelector(".appbar .shell"));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitNav);
+  document.querySelectorAll("#section-nav a").forEach(function (a) { var l = a.querySelector(".lbl"); if (l) a.title = l.textContent; });
+
+  var navLinks = Array.prototype.slice.call(document.querySelectorAll("#section-nav a"));
+  var sections = navLinks.map(function (a) { return document.getElementById(a.getAttribute("href").slice(1)); });
+  function markSection() {
+    var current = -1;
+    sections.forEach(function (s, i) { if (s && s.getBoundingClientRect().top <= 120) current = i; });
+    navLinks.forEach(function (a, i) { if (i === current) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current"); });
+    return current;
+  }
+  var ticking = false;
+  window.addEventListener("scroll", function () { if (!ticking) { ticking = true; requestAnimationFrame(function () { markSection(); ticking = false; }); } }, { passive: true });
+  markSection();
+  document.querySelectorAll(".stepper [data-step]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var i = Math.max(0, Math.min(sections.length - 1, markSection() + Number(b.dataset.step)));
+      if (sections[i]) sections[i].scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
+    });
+  });
+
+  // Print: open every disclosure so calculations print in full, then restore the reader's state.
+  var openBefore = [];
+  window.addEventListener("beforeprint", function () {
+    openBefore = Array.prototype.map.call(document.querySelectorAll("details"), function (d) { var was = d.open; d.open = true; return was; });
+  });
+  window.addEventListener("afterprint", function () {
+    document.querySelectorAll("details").forEach(function (d, i) { if (openBefore[i] !== undefined) d.open = openBefore[i]; });
+  });
+})();
+</script>
+<!--/PAGE:BODY-->
+</body>
+</html>
