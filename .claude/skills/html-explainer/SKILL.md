@@ -1,144 +1,122 @@
 ---
 name: html-explainer
-description: Builds interactive HTML explanations in the user's house style, in the manner of Bartosz Ciechanowski and Josh Comeau - a readable argument made of small experiments, where each figure asks one question, the reader makes one change, and the prose says what to notice and why - written for executives (conclusion first, British English, a Matt Levine / Ethan Mollick voice) in a navy, teal and mint IBM Plex design that opens offline from one file. Use it whenever the user wants something that explains a product, feature, tool, system, process, project, incident, proposal, funding case or complex topic, short or long, and whenever they ask to turn notes, documents, code, data or a conversation into an explainer, guide, one-pager, briefing, walkthrough or "something I can send round", even if they never say HTML. Asks targeted multiple-choice questions when key facts are missing. Not for slide decks, Word or PDF documents, live-data dashboards, or developer docs that belong in a repository.
+description: "Create original, self-contained interactive HTML explainers, briefings and field guides from ideas, documents, data or software. Use for a readable, visually distinctive argument with meaningful diagrams, experiments and substantial prose. British English; light-first navy, blue, teal and mint identity. Not for dashboards, slide decks or developer documentation."
 ---
 
 # HTML explainer
 
-Make one standalone HTML page that leaves its reader able to **explain a mechanism, predict a consequence or assess a proposal**. It is a readable argument with a few carefully chosen experiments, not a dashboard: a reader changes one thing, sees the consequence, and is told enough to interpret it. Quality comes from the fit between the question, the model, the action and the prose, never from the number of controls.
+Create an original piece of interactive editorial communication. Think like a first-rate explanatory writer, information designer and creative technologist. The result should feel recognisably part of one family, yet be composed for its particular subject.
 
-Two traditions meet here. **Bartosz Ciechanowski** for how to construct an explanation: a chain of increasingly capable models, the same objects kept on screen while one condition changes, the visual language taught before it is relied on, and prose written around each act of observation. **Josh Comeau** for how to compose and maintain it: substantial writing around purpose-built demonstrations, one parameter introduced at a time before a combined sandbox, and a small reusable framework underneath. The page itself belongs to the user: their prose style, their visual identity, no byline.
+**The governing distinction:** standardise identity, editorial judgement and correctness; do not standardise page composition. This skill is a creative brief, not a page template. A technically compliant but visually generic result has failed.
 
-## What a good page does
+## The job
 
-- States its conclusion in the hero in plain text, plus an outcome statement: what the reader will be able to do afterwards.
-- Answers a **sequence of questions in dependency order**. Each section's model repairs a limitation of the one before.
-- Has **small figures in the reading flow**, each answering one question with **one or two controls**. All controls appear together only in a closing sandbox, after each was met alone.
-- Surrounds every figure with prose. Before it: the question, any new encoding, and one suggested action. After it: what to notice, why it happens, and where it stops applying.
-- Keeps the **same cast and encodings** from first figure to last.
-- Includes at least one **prediction prompt** and one **boundary case** where the rule just taught changes.
-- Tags every number as *measured*, *modelled*, *assumed* or *illustrative*, and never lets a smooth model make an assumption look like a fact.
-- Opens offline in Light theme, works from 320 px phones to 27-inch screens, and still reads with JavaScript off.
+- Leave the reader able to explain a mechanism, predict a consequence or make a better decision.
+- Give a time-pressed executive the argument in the hero, headings and first sentences; reward a careful reader with evidence, mechanisms, examples and experiments.
+- Make an argument through substantial prose and the right visual representations. This is not a dashboard or a slideshow disguised as a webpage.
+- Let the topic dictate length, density, figure count and narrative structure. Meet the user's stated length. No obligatory sections, charts, metric cards or sandbox.
+- Prefer one memorable explanatory idea to five interchangeable widgets.
 
-## Files
+## 1. Understand before designing
 
-| File | Read it when |
-|---|---|
-| `references/explanation-method.md` | **First, always.** The method: outcome statements, sequences of models, writing around observation, the interaction vocabulary, when an interaction earns its space, moves borrowed from specific articles |
-| `references/planning.md` | Before building: the eight work products, the plan file, the per-figure record, review of behaviour and understanding |
-| `references/questions.md` | When something only the user can decide is missing |
-| `references/page-method.md` | Tiers, the cast, real outputs for product explainers, worked cases, reference sections |
-| `references/prose-style.md` | Before writing any copy. The user's own style guide; follow it closely |
-| `references/interactive-models.md` | Before building figures: the component catalogue, state separation, renderer choice, time, dragging, performance, accessibility |
-| `references/visual-system.md` | When extending the look beyond the template |
-| `assets/template.html` | The starting point: a complete worked example of the method, plus the framework |
-| `scripts/embed_fonts.py`, `embed_json.py`, `check_page.js`, `make_fragment.py` | Fonts, captured data, the browser check, the Artifact-ready copy |
+1. Read the supplied material, conversation, code and data. Investigate factual claims; for a runnable product, examine actual behaviour and capture real examples where practical.
+2. Write one outcome sentence internally: "After reading, the audience can [explain / predict / identify / decide] [specific thing]."
+3. Establish the reader, their existing knowledge, the central tension, the conclusion, and the conditions that could change it.
+4. List essential claims with sources and evidence status: **measured**, **modelled**, **assumed** or **illustrative**. Never invent observed performance, real outputs, product behaviour or citations.
+5. Work out the argument in plain language before deciding which parts need visualisation. Start with the simplest case; introduce complexity when that case fails or hides a consequential constraint.
+6. Ask a brief question only when an essential choice cannot responsibly be inferred. Otherwise decide and proceed. Do not make the user art-direct a routine job.
 
-## Workflow
+## 2. Find the creative idea
 
-### 1. Settle the brief
+Before writing HTML, privately sketch **three materially different concepts**, each with:
+- Its opening visual or narrative hook.
+- Its distinctive explanatory mechanism, metaphor or representation.
+- The interaction that would create the most useful discovery, if any.
+- Its page rhythm: how text, open space, diagrams, comparisons and dense evidence alternate.
+- Its main weakness.
 
-Read everything available: the request, attachments, the conversation, and any code or data the page will describe. Then write the **outcome statement**:
+Choose the strongest on explanatory power, originality and fit with the reader. Combine strengths when useful. Do not show all three unless asked. This creative choice happens in the same execution, not in a user approval loop.
 
-> After this page, the reader can *[predict / decide / explain / identify]* … *[something specific and checkable]*.
+**Avoid the first plausible design.** If the concept could be reused unchanged for a different subject, it is probably too generic. An operating process, a market argument, a product walkthrough and a strategic proposal should not share one layout.
 
-Also settle the audience, the document type (feature, problem, proposal, project, observed data, topic), the shape (brief, explainer or field guide) and any length the user stated, and what ground truth exists.
+## 3. Keep the house identity, vary its expression
 
-If something only the user can decide is missing, or a wrong guess would waste a long build, ask: one round, at most four multiple-choice questions generated from the material in hand, recommendation first (`references/questions.md`). Use `AskUserQuestion` where it exists; otherwise ask inline. If nothing important is missing, ask nothing, state the brief in three or four lines including the outcome statement, and carry on.
+**Fixed identity**
+- Editorial-tech, precise and quietly futuristic. Light theme first, with a user-controlled dark theme when useful.
+- Core colours: ice #F3F7FB, white #FFFFFF, navy #003168, baseline blue #0051A5, active teal #007F73, electric mint #35E0C1, midnight #071B2C. Adapt proportions and supporting neutrals to the piece.
+- IBM Plex Sans for expressive, readable prose; IBM Plex Mono for data, labels, units and indices. Use the supplied font assets where available.
+- Clear alignment, intentional whitespace, fine rules, exact labels and disciplined numerical typography. Blue denotes baseline; teal/mint denotes change or an active model, unless the subject warrants another explicitly explained encoding.
+- Distinctive editorial voice and purposeful interaction; no byline or personal credit.
 
-### 2. Investigate and plan
+**Creative freedom**
+- Invent the hero, section composition, scale shifts, diagrams, typographic moments and transitions for this story.
+- Use asymmetry, contrast, large explanatory visuals and occasional dense analytical passages when earned. Alternation matters more than a fixed grid.
+- Light pages can contain a dramatic dark focal passage, but it is not mandatory and has no prescribed location.
+- Treat existing assets/template.html as a source of tokens and tested technical ideas, **never as the required structure**. Do not start by copying its five-figure example.
+- A design family needs recognisable decisions, not identical screens.
 
-Better graphics cannot repair a weak investigation. Get a credible account of the system in plain text before choosing any action for the reader. If the subject is software you can run, run it on realistic invented data and capture real outputs.
+**Reject**
+- Repeating cards, generic KPI hero strips, predictable alternating two-column sections, decorative charts and default SaaS-dashboard styling.
+- Stock photography, ornamental imagery, glow, fake telemetry, spurious status indicators and purposeless motion.
+- Arbitrary symmetry, cramped microtext, enormous empty gutters, everything in bordered boxes, or a rainbow of accent colours.
+- The same interaction sequence in every explainer.
 
-Then write `<page-name>.plan.md` next to the page (`references/planning.md`):
+## 4. Write with a distinctive editorial accent
 
-- the outcome, plus an **unfamiliar test case** and its answer;
-- claims with their evidence status;
-- the **sequence of models**: each question, and what the previous model got wrong;
-- the argument in plain text, with no figures;
-- **one record per figure**: reader question, initial case, action, expected observation, explanation, what is held fixed, boundary case, evidence status, static equivalent;
-- the model specification, run on the teaching cases.
+- British English. Write like a sharp, well-read colleague explaining the plumbing over coffee, without imitating any particular writer's phrases.
+- Lead with the conclusion, friction point or decision; explain why it matters immediately. Use question-led headings with the answer near the top.
+- Concrete actors and verbs: who sends what, who decides, what changes, what fails and why.
+- Build understanding through small causal models. Use a toy example when it illuminates a mechanism; add one complication only when it earns its place.
+- Anticipate the intelligent objection, answer it and state the boundary where the answer changes.
+- Vary sentence length. Use explicit causal links; allow the occasional short, dry punchline rather than a parade of bullet points.
+- Use understatement and memorable names for mechanisms sparingly. Be confident about evidence and precise about uncertainty.
+- Avoid managerial slogans, stock AI phrasing, inflated adjectives, repetitive triplets and paragraphs that only restate a heading.
+- Provide substantial explanation where the reader needs it. Charts do not replace thinking or prose.
 
-Cut every figure whose expected observation is just "a number changes", or whose static equivalent teaches as well. Say in the plan why it was cut.
+## 5. Make interactivity teach something
 
-### 3. Start from the template
+Choose the mechanism from the **reader's question**, not from a component catalogue:
+- **Reveal:** expose a hidden step, dependency or assumption.
+- **Compare:** contrast baseline and alternative on a consistent scale.
+- **Manipulate:** change one consequential input and observe the mechanism.
+- **Simulate:** play out flows, queues, compounding, timing or feedback.
+- **Trace:** follow one object through a system or evidence chain.
+- **Filter / zoom / switch perspective:** make a large or ambiguous relationship intelligible.
+- **Predict, then test:** invite a judgement before revealing a surprising result.
 
-Copy `assets/template.html` to the output path and run `python scripts/embed_fonts.py <page>.html`. The template is a complete example of the method. A two-branch project plan is explained in five figures:
+These are possibilities, not required components. Invent another when the story needs it. A figure must have a question, useful initial state, meaningful reader action, perceptible observation and explanation of **why** it happens. If a static figure explains as well, use the static figure. A slider that merely changes a number is seldom enough.
 
-1. an event stepper that teaches the encoding;
-2. one control, after a prediction prompt;
-3. a different single control on the same objects;
-4. a boundary case as a linked comparison on one scale;
-5. a closing sandbox in the single Midnight stage.
+For genuine models, separate inputs, assumptions, pure calculation, scenario state, view state and rendering. All linked charts, annotations and live prose must come from the same result. Keep names, scales and colour meanings stable when comparing the same entities. Show limits and boundary cases. Give controls labels, units, reset or presets as appropriate, keyboard support and textual equivalents.
 
-It also carries the framework: `Demo.create`, presets, prose triggers, reset, event stepping, drag handles, prediction prompts and example viewers.
+Place prose where it helps the experiment: set up the question and what to try; after the figure explain the observation, mechanism and consequence. A final combined sandbox is optional, not a standard ending.
 
-Keep the framework and the visual system; replace the example. Delete what you do not use. Keep `<title>` first after the `PAGE:HEAD` marker, and give the page a real two-to-five-word name.
+## 6. Compose and build
 
-### 4. Write
+- Start with the chosen concept, not a stock component library. Make the first screen visually and intellectually compelling.
+- Use visual hierarchy and varied pacing: expansive moments followed by tighter explanations, comparisons or evidence. Give each section a distinct job.
+- Let the chart form follow the relationship: SVG/HTML for addressable objects and diagrams, charts for comparable quantities, Canvas for dense marks. Use the simplest renderer that serves the idea.
+- Use restrained motion to reveal state change, causality or continuity; respect reduced-motion settings. Never animate merely because you can.
+- Build one standalone HTML file with embedded CSS, JavaScript, fonts and any necessary data. No CDN, external network dependency or build step.
+- Render the core argument, baseline figures, labels and essential results in static HTML so the page remains useful without JavaScript and in print.
+- Design for desktop and mobile, including narrow screens around 320px. Ensure legible labels, touch targets, contrast and no clipped charts.
+- Optional engineering helpers: assets/fonts, scripts/embed_fonts.py, scripts/embed_json.py and scripts/check_page.js. Use what fits; do not inherit the old example's framework, figure count or DOM structure by default.
 
-Follow `references/prose-style.md`, and `references/explanation-method.md` §5 for the passages around figures:
+## 7. Review like an art director and an editor
 
-- Open with the friction point or decision. Use question-led headings, each section's answer in its first sentence.
-- Before a figure: the question, any new encoding, and one action, often as an inline trigger.
-- After a figure: the observation, the mechanism, the trade-off or limit.
-- Keep prose true after interaction: anchor sentences to named cases or write rules that hold across the range. The live line under each figure comes from the same model result as the drawing.
-- Voice: a sharp colleague who has read everything. Toy models and deadpan understatement from Levine; real examples, named frameworks and honest caveats from Mollick. British English, active verbs, one bold insight per key paragraph.
-- Never hide a condition that could reverse the conclusion in a collapsed panel.
+Render the actual page and inspect screenshots at narrow and wide widths. Do not assume valid HTML equals good design. Review in this order:
 
-### 5. Build the figures
+1. **Concept:** Is there a memorable visual idea, or just professionally styled components?
+2. **Story:** Can someone skim the hero, headings and first sentences and grasp the argument?
+3. **Variety:** Does the composition respond to the material, or repeat a template?
+4. **Interaction:** Does each action produce a discovery the reader can recognise and explain?
+5. **Writing:** Is the prose specific, coherent, engaging and recognisably in the house voice?
+6. **Truth:** Do figures, claims, boundary cases and model outputs agree? Are assumptions visible?
+7. **Quality:** Test controls, resets, theme, keyboard, mobile, print, offline behaviour and JavaScript-off fallbacks.
 
-Follow `references/interactive-models.md`. One pure `model()` for the page where possible, so every figure shows the same objects. One renderer with options per figure. `Demo.create` per figure, with only the parameters that figure is about.
+Identify the **three weakest aspects**. Improve them in the same run, including a substantial visual redesign if the page feels generic. If browser inspection is unavailable, report the limitation; don't claim it was tested. scripts/check_page.js may help with technical checks but is not an aesthetic judge.
 
-Every figure gets:
+## 8. Deliver
 
-- a useful default in which the relationship is already visible;
-- a reset;
-- a `.live` line computed from the model;
-- a `.fig-summary` in the static HTML stating the teaching case's result, worked out by running the model.
+Provide the HTML and a concise note on its thesis, the interaction worth trying, evidence limitations and what was actually tested. A separate planning document is optional for unusually complex or audit-sensitive work, not a default deliverable.
 
-Use `figure.ex` viewers with embedded real outputs (`scripts/embed_json.py`) as evidence beside the experiments in product explainers, not instead of them.
-
-### 6. Review
-
-- Run `node scripts/check_page.js <page>.html --out <dir>` once. It covers:
-  - errors, network calls, overflow and clipped text;
-  - Light-first opening and embedded fonts;
-  - every slider, preset and prediction prompt;
-  - the theme switch keeping state, print, and JavaScript off.
-  Look at the screenshots.
-- Run the model on the teaching cases and boundaries in a quick script, and compare with every number in the prose, hero and fallback text.
-- Review understanding (`references/planning.md` §5):
-  - answer the plan's unfamiliar case using only what the page taught;
-  - read only the hero, headings and bold lines;
-  - for each figure, ask whether the expected observation would actually be noticed.
-- Fix in one pass. If Playwright is unavailable, say so rather than installing it uninvited.
-
-### 7. Deliver
-
-- Save the standalone `.html` and its `.plan.md` where the user can open them.
-- If an Artifact tool is available and the page is to be shared, publish the copy made by `python scripts/make_fragment.py <page>.html -o <page>.artifact.html`.
-- Reply briefly with:
-  - the location and link;
-  - the outcome statement and the thesis;
-  - anything inferred or illustrative that needs confirming;
-  - what was checked.
-
-## Length
-
-Length follows from the topic, not from a word count. **If the user states a length** (words, minutes, screens, pages, "short", "one screen-ish"), that is the target; meet it and say in the reply if the outcome needed more. Otherwise the page is as long as the sequence of models the outcome requires: count the ideas the reader must hold, in dependency order, give each one the prose and figure it needs, and stop. A one-mechanism topic is short even if there is plenty more to say; a system with six interacting parts is long even if the reader is busy. Never pad to reach a size or cut a step the argument depends on to stay under one.
-
-The tiers name a shape, not a size:
-
-- **Brief**: hero, one or two figures, "what would change this", method.
-- **Explainer**: question-led sections, one small figure each, a closing sandbox.
-- **Field guide**: a long sequence of models, then failures, worked cases and reference (`references/page-method.md`).
-
-## House rules
-
-- One file with everything embedded. No CDNs, no network calls, no build step.
-- Light theme on first open, with a visible Light/Dark switch that keeps all state.
-- No byline, watermark, stock imagery, decoration, glow, fake telemetry or looping animation.
-- Blue means baseline; teal or mint means the thing the reader controls or a modelled result. At most one Midnight focal stage, usually the closing sandbox.
-- IBM Plex Sans for prose and headings; IBM Plex Mono with tabular numbers for figures, units, axes and indices.
-- Invented cast, named identically everywhere. Never invent product behaviour; use real outputs where the subject can be run.
+**Final test:** Would this piece make a discerning reader say "I hadn't understood it that way before", and would it still feel like part of the same editorial family as the last piece? If only the second is true, the skill has become a template.
