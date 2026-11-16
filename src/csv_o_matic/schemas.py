@@ -18,10 +18,10 @@ The schemas are open: a consumer must ignore fields it does not know.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, NotRequired
 
 from pydantic import ConfigDict
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import TypedDict
 
 Outcome = Literal["match_found", "confirmed_absent", "inconclusive"]
 StopReason = Literal["end_of_file", "row_limit", "output_size_limit", "time_limit", "cancelled",
@@ -469,13 +469,15 @@ class CompareResult(_Response):
 
     `comparison_status`: compared (every record paired), partially_compared (some records could not be
     paired), ambiguous_alignment (records could not be paired at all), present_in_one_file_only,
-    absent_from_both, or inconclusive (a scan was incomplete or unreliable; nothing was compared).
+    absent_from_both, no_comparable_columns (present in both, but no column pairs up, so no value was
+    compared), or inconclusive (a scan was incomplete or unreliable; nothing was compared).
     On a request that could not be run, `outcome` is "inconclusive" and `comparison_status` is absent.
     """
 
     explanation: str
     comparison_status: NotRequired[Literal["compared", "partially_compared", "ambiguous_alignment",
-                                           "present_in_one_file_only", "absent_from_both", "inconclusive"]]
+                                           "present_in_one_file_only", "absent_from_both", "no_comparable_columns",
+                                           "inconclusive"]]
     outcome: NotRequired[Literal["inconclusive"]]
     file_a: NotRequired[FileInfo]
     file_b: NotRequired[FileInfo]

@@ -23,11 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import pandas as pd  # noqa: E402
+import pandas as pd
 
-from csv_o_matic.config import Config, Limits  # noqa: E402
-from csv_o_matic.csvscan import ScanControl  # noqa: E402
-from csv_o_matic.service import MAX_IDENTIFIER_CHARS, Service  # noqa: E402
+from csv_o_matic.config import Config, Limits
+from csv_o_matic.csvscan import ScanControl
+from csv_o_matic.service import MAX_IDENTIFIER_CHARS, Service
 
 
 def main() -> int:

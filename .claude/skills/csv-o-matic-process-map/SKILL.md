@@ -170,9 +170,12 @@ which of its files the consumer picks.
 
 ## Limits to know
 
-- Folders are flat: only regular `.csv` files directly inside a declared folder are visible.
-  Subfolders (per-date directories, archives) each need their own folder entry, or stay out of
-  reach - say so in `notes` if relevant.
+- A declared folder is an approved root: its files and the files in its real subfolders (per-date
+  directories, archives), to any depth, can be listed and read without further entries. Subfolders
+  inherit the folder's `csv_format`, `filename_convention`, `identifier_columns` and
+  `record_key_columns`; give a subfolder its own folder entry only when those differ. Say in
+  `notes` how the subfolders are organised. Symbolic links are never followed, and nothing
+  outside the declared folders is reachable.
 - Every file is assumed to have a header row. Headerless files cannot be described.
 - Encodings: `utf-8` (a BOM is fine), `ascii`, `latin-1`, `cp1252`. UTF-16 exports and
   compressed files are refused. The delimiter is one character; quoting is standard

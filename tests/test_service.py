@@ -5,10 +5,9 @@ import os
 
 import pytest
 
+from conftest import digest, dumps, make_service
 from csv_o_matic.csvscan import ScanControl
 from csv_o_matic.service import ToolFailure
-
-from conftest import digest, dumps, make_service
 
 A = "stage/a"
 B = "stage/b"

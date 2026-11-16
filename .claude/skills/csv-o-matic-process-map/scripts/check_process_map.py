@@ -67,7 +67,7 @@ def import_model(repo: Path | None):
             "`pip install -e .` there. It needs pyyaml and pydantic.",
             file=sys.stderr,
         )
-        raise SystemExit(2)
+        raise SystemExit(2) from None
     return process_maps
 
 

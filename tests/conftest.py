@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from csv_o_matic import schemas
 from csv_o_matic.config import Config, Limits
 from csv_o_matic.csvscan import ScanControl
-from csv_o_matic import schemas
 from csv_o_matic.service import Service
 
 PROCESS_MAP = """

@@ -14,12 +14,11 @@ import anyio
 import pytest
 from mcp.client import Client
 
+from conftest import check_schema, digest, strict
 from csv_o_matic.config import Config, Limits
 from csv_o_matic.csvscan import ScanControl
 from csv_o_matic.server import build_server
 from csv_o_matic.service import Service, ToolFailure
-
-from conftest import check_schema, digest, strict
 
 MAP = r"""
 id: positions

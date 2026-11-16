@@ -229,17 +229,21 @@ the scan got and why it stopped.
   returned. A match never implies that all matches were returned.
 - `next_cursor` continues a search that stopped at a row limit, the output-size limit or the
   time limit. Cursors are stateless tokens: they hold a file position, are tied to the search
-  and to the file's size and modification time, and stop working if the file changes or the
-  server restarts. Every call reads at least one chunk, so a chain of cursors reaches the end
-  of the file however short the time budget, with one known exception: when a single record is
-  longer than one chunk (in practice, an unclosed quote) and the budget expires before the
-  second chunk, each call stops at the same `stopped_at_byte`. If two responses in a chain
-  stop at the same byte, raise `max_scan_seconds`; the scan then ends in a `parse_error` or an
-  unterminated-quote warning.
+  and to the physical file (device, inode, size, modification and change time), and stop
+  working if the file is changed or replaced or the server restarts. Every call gets past at
+  least one record before the time limit applies, even a record longer than one read, so each
+  response stops at a later byte than the last and a chain of cursors always reaches the end
+  of the file however short the time budget.
+- A cursor also carries what earlier responses in its chain saw: signs of a wrong encoding,
+  undecodable bytes, near misses. A clean last page therefore cannot turn a file that an
+  earlier page found unreliable into `confirmed_absent` or an exact count.
 - `count_matching_rows` returns `count` only after a complete scan. Otherwise `count` is
   `null`, `count_is_exact` is `false`, and `matches_seen_before_interruption` is a lower bound.
 - `compare_security_records` reports `comparison_status`: `compared`, `partially_compared`,
-  `ambiguous_alignment`, `present_in_one_file_only`, `absent_from_both` or `inconclusive`.
+  `ambiguous_alignment`, `present_in_one_file_only`, `absent_from_both`,
+  `no_comparable_columns` (found in both files, but no column pairs up, so no value was
+  compared) or `inconclusive`. A `column_mapping` entry naming a column that is not in file A
+  is reported under `warnings`.
   When a file holds several records for the security and no `match_keys` are given, nothing is
   paired or compared; the response lists the records and the columns that tell them apart.
 
@@ -372,6 +376,7 @@ listed nor read, and compressed data is refused even under a `.csv` name.
 
 ```bash
 python -m pytest                                              # unit, tool, property and MCP protocol tests
+ruff check . && python -m mypy                                # lint and type-check (both also run in CI)
 python scripts/check_against_pandas.py /path/to/your/file.csv # compare answers with pandas on a real file
 python scripts/acceptance_large_file.py --gb 2                # large-file acceptance
 python scripts/acceptance_large_file.py --gb 2 --style quote_all

@@ -30,7 +30,7 @@ Required fields are marked **R**.
 | `description` | R | What the folder holds **and its grain** ("One row per listing"). | `list_folders` |
 | `filename_convention` | | Mapping, below. Omit only when another map declares it for the same path, or filenames carry no information. | `list_csv_files` |
 | `identifier_columns` | | List of `{column, identifier_type, notes}`. `column` is the exact header name. `identifier_type` is free text (`ISIN`, `SEDOL`, `CUSIP`, `vendor internal id`). | `list_folders`; tells the model which column to search |
-| `record_key_columns` | | List of exact header names that together identify one record. | guides `match_keys` in `compare_security_records` |
+| `record_key_columns` | | List of exact header names that together identify one record. | reported by `list_folders` / `list_csv_files`; guides `filters` in the search tools and `match_keys` in `compare_security_records` |
 | `csv_format` | | `{delimiter: ",", encoding: utf-8}` are the defaults. Delimiter: one printable ASCII character or tab. Encoding: `utf-8`, `ascii`, `latin-1`, `cp1252`. | every scan; conflicts across maps block the folder |
 | `notes` | | Layout changes over time, stray files, quirks. | full map |
 
