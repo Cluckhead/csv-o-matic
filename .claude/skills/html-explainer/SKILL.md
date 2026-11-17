@@ -39,6 +39,11 @@ Choose the strongest on explanatory power, originality and fit with the reader. 
 
 **Avoid the first plausible design.** If the concept could be reused unchanged for a different subject, it is probably too generic. An operating process, a market argument, a product walkthrough and a strategic proposal should not share one layout.
 
+**Storyboard the composition before building components.**
+- Sketch the full page's visual rhythm: opening, large explanatory moments, narrow reading passages, dense evidence, contrasts and resolution. Give each major section a distinct editorial job.
+- Vary scale, density, asymmetry and the relationship of prose to visuals because the argument needs it, not merely to create variety. Consider immersive experiments, annotated diagrams, comparative spreads and layered evidence without treating any as compulsory.
+- **Thumbnail test:** imagine the entire page as a strip of small screenshots. If three consecutive sections have essentially the same silhouette, reconsider the composition before coding.
+
 ## 3. Keep the house identity, vary its expression
 
 **Fixed identity**
@@ -86,6 +91,12 @@ Choose the mechanism from the **reader's question**, not from a component catalo
 
 These are possibilities, not required components. Invent another when the story needs it. A figure must have a question, useful initial state, meaningful reader action, perceptible observation and explanation of **why** it happens. If a static figure explains as well, use the static figure. A slider that merely changes a number is seldom enough.
 
+**Design the discovery before the control.**
+- For a substantial explainer, develop one **signature interaction** specific to its subject. Name the reader's initial expectation, the action they take, the relationship that becomes visible and why it changes their understanding. Do not manufacture a surprise when the evidence does not support one.
+- Consider direct manipulation of the subject, linked views, causal simulation, perspective changes and progressive revelation **before** reaching for sliders or chart filters.
+- Prefer interaction with the actual conceptual object (orbit, process, network, timeline, decision) over a detached control panel when practical and accessible.
+- Concentrate creative effort on this signature mechanism; supporting figures may be static or simple. Reject spectacle that does not teach anything.
+
 For genuine models, separate inputs, assumptions, pure calculation, scenario state, view state and rendering. All linked charts, annotations and live prose must come from the same result. Keep names, scales and colour meanings stable when comparing the same entities. Show limits and boundary cases. Give controls labels, units, reset or presets as appropriate, keyboard support and textual equivalents.
 
 Place prose where it helps the experiment: set up the question and what to try; after the figure explain the observation, mechanism and consequence. A final combined sandbox is optional, not a standard ending.
@@ -105,15 +116,15 @@ Place prose where it helps the experiment: set up the question and what to try; 
 
 Render the actual page and inspect screenshots at narrow and wide widths. Do not assume valid HTML equals good design. Review in this order:
 
-1. **Concept:** Is there a memorable visual idea, or just professionally styled components?
+1. **Concept:** Name the most visually distinctive section. Is its idea specific to this subject, or just professionally styled components?
 2. **Story:** Can someone skim the hero, headings and first sentences and grasp the argument?
-3. **Variety:** Does the composition respond to the material, or repeat a template?
-4. **Interaction:** Does each action produce a discovery the reader can recognise and explain?
+3. **Variety:** Scan the whole page at thumbnail scale. Do neighbouring sections repeat the same silhouette without a good reason?
+4. **Interaction:** Name the most memorable discovery. Does it change understanding rather than just changing a number?
 5. **Writing:** Is the prose specific, coherent, engaging and recognisably in the house voice?
 6. **Truth:** Do figures, claims, boundary cases and model outputs agree? Are assumptions visible?
 7. **Quality:** Test controls, resets, theme, keyboard, mobile, print, offline behaviour and JavaScript-off fallbacks.
 
-Identify the **three weakest aspects**. Improve them in the same run, including a substantial visual redesign if the page feels generic. If browser inspection is unavailable, report the limitation; don't claim it was tested. scripts/check_page.js may help with technical checks but is not an aesthetic judge.
+Identify the **three weakest aspects**, including whether the signature interaction and distinctive visual section are actually memorable. Improve them in the same run, including a substantial redesign if the page feels generic. If browser inspection is unavailable, report the limitation; don't claim it was tested. scripts/check_page.js may help with technical checks but is not an aesthetic judge.
 
 ## 8. Deliver
 
