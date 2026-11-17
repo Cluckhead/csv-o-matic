@@ -23,8 +23,9 @@ Create an original piece of interactive editorial communication. Think like a fi
 2. Write one outcome sentence internally: "After reading, the audience can [explain / predict / identify / decide] [specific thing]."
 3. Establish the reader, their existing knowledge, the central tension, the conclusion, and the conditions that could change it.
 4. List essential claims with sources and evidence status: **measured**, **modelled**, **assumed** or **illustrative**. Never invent observed performance, real outputs, product behaviour or citations.
-5. Work out the argument in plain language before deciding which parts need visualisation. Start with the simplest case; introduce complexity when that case fails or hides a consequential constraint.
-6. Ask a brief question only when an essential choice cannot responsibly be inferred. Otherwise decide and proceed. Do not make the user art-direct a routine job.
+5. **Fix the vocabulary before drafting.** Choose one precise term for each actor, population, group, measure, state and process, then use it consistently in prose, figures, controls and labels. Never swap in a synonym for elegance if it could change what is being counted or described. Define each source, evidence tag, abbreviation and named group on first use.
+6. Work out the argument in plain language before deciding which parts need visualisation. Start with the simplest case; introduce complexity when that case fails or hides a consequential constraint.
+7. Ask a brief question only when an essential choice cannot responsibly be inferred. Otherwise decide and proceed. Do not make the user art-direct a routine job.
 
 ## 2. Find the creative idea
 
@@ -69,6 +70,8 @@ Choose the strongest on explanatory power, originality and fit with the reader. 
 ## 4. Write with a distinctive editorial accent
 
 - British English. Write like a sharp, well-read colleague explaining the plumbing over coffee, without imitating any particular writer's phrases.
+- **Write for someone who sees only the finished page.** Make every claim and reference self-contained. Do not mention the request, attachments, prompts, working notes or the process of making the page. Cite and name actual evidence sources where needed, rather than referring to unseen materials.
+- Prefer ordinary language to analyst jargon: say *hypothetical* when describing an imagined case, not *conditional*; use a technical term only when it adds precision, and explain it before relying on it.
 - Lead with the conclusion, friction point or decision; explain why it matters immediately. Use question-led headings with the answer near the top.
 - Concrete actors and verbs: who sends what, who decides, what changes, what fails and why.
 - Build understanding through small causal models. Use a toy example when it illuminates a mechanism; add one complication only when it earns its place.
@@ -120,9 +123,10 @@ Render the actual page and inspect screenshots at narrow and wide widths. Do not
 2. **Story:** Can someone skim the hero, headings and first sentences and grasp the argument?
 3. **Variety:** Scan the whole page at thumbnail scale. Do neighbouring sections repeat the same silhouette without a good reason?
 4. **Interaction:** Name the most memorable discovery. Does it change understanding rather than just changing a number?
-5. **Writing:** Is the prose specific, coherent, engaging and recognisably in the house voice?
-6. **Truth:** Do figures, claims, boundary cases and model outputs agree? Are assumptions visible?
-7. **Quality:** Test controls, resets, theme, keyboard, mobile, print, offline behaviour and JavaScript-off fallbacks.
+5. **Writing:** Is the prose specific, coherent, engaging and recognisably in the house voice? Are terms consistent and all sources, tags and groups defined at first use? Could a reader understand it without the original material?
+6. **Page-grounding:** Check every sentence that points to an interface element, example, ordering, comparison or number against the **rendered page**. Confirm the referenced element exists; its position, name and state are correct; and every stated count, lead, percentage and comparison uses the right population, denominator and moment. Recheck dynamic prose after changing controls; replace ambiguous references with explicit labels.
+7. **Truth:** Do figures, claims, boundary cases and model outputs agree? Are assumptions visible?
+8. **Quality:** Test controls, resets, theme, keyboard, mobile, print, offline behaviour and JavaScript-off fallbacks.
 
 Identify the **three weakest aspects**, including whether the signature interaction and distinctive visual section are actually memorable. Improve them in the same run, including a substantial redesign if the page feels generic. If browser inspection is unavailable, report the limitation; don't claim it was tested. scripts/check_page.js may help with technical checks but is not an aesthetic judge.
 
